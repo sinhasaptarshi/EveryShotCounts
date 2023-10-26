@@ -10,3 +10,6 @@
 !/data/letsea_14/split.json
 /logs/
 /wandb/
+*.pth
+*.jpg
+*.out

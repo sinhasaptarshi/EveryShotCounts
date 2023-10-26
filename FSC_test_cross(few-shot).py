@@ -24,6 +24,8 @@ assert "0.4.5" <= timm.__version__ <= "0.4.9"  # version check
 import util.misc as misc
 import models_mae_cross
 
+os.environ['MASTER_ADDR'] = 'localhost'
+os.environ['MASTER_PORT'] = '12355'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -59,7 +61,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='./data/FSC147/', type=str,
+    parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/FSC147/', type=str,
                         help='dataset path')
     parser.add_argument('--anno_file', default='annotation_FSC147_384.json', type=str,
                         help='annotation json file')
@@ -74,7 +76,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='./output_fim6_dir/checkpoint-0.pth',
+    parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/fim6_dir/checkpoint__finetuning_minMAE.pth',
                         help='resume from checkpoint')
     parser.add_argument('--external', default=False,
                         help='True if using external exemplars')
@@ -254,7 +256,8 @@ def main(args):
     # print("Model = %s" % str(model_without_ddp))
 
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        model = torch.nn.parallel.DataParallel(model, device_ids=[0,1,2,3])
         model_without_ddp = model.module
 
     misc.load_model_FSC(args=args, model_without_ddp=model_without_ddp)

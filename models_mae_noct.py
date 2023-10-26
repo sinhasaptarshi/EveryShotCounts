@@ -120,6 +120,7 @@ class MaskedAutoencoderViTNoCT(nn.Module):
         
         # sort noise for each sample
         ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+        
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
         # keep the first subset
@@ -143,21 +144,26 @@ class MaskedAutoencoderViTNoCT(nn.Module):
 
         # masking: length -> length * mask_ratio
         x, mask, ids_restore = self.random_masking(x, mask_ratio)
+        
 
         # apply Transformer blocks
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
+        print(ids_restore.shape)
 
         return x, mask, ids_restore
 
     def forward_decoder(self, x, ids_restore):
         # embed tokens
         x = self.decoder_embed(x)
+        print(x.shape)
 
         # append mask tokens to sequence
         mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] - x.shape[1], 1)
+
         x_ = torch.cat([x, mask_tokens], dim=1)  # no cls token
+        print(x_.shape)
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
         x = x_ # append cls token
 

@@ -27,10 +27,12 @@ import util.lr_sched as lr_sched
 from util.FSC147 import transform_train
 import models_mae_cross
 
+os.environ['MASTER_ADDR'] = 'localhost'
+os.environ['MASTER_PORT'] = '12355'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=26, type=int,
+    parser.add_argument('--batch_size', default=128, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -60,7 +62,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='./data/FSC147/', type=str,
+    parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/FSC147/', type=str,
                         help='dataset path')
     parser.add_argument('--anno_file', default='annotation_FSC147_384.json', type=str,
                      help='annotation json file')
@@ -77,7 +79,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='./data/out/pre_4_dir/checkpoint-300.pth',
+    parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
                         help='resume from checkpoint')
 
     # Training parameters
@@ -102,13 +104,13 @@ def get_args_parser():
                         help='path where to tensorboard log')
     parser.add_argument("--title", default="CounTR_finetuning", type=str)
     parser.add_argument("--wandb", default="counting", type=str)
-    parser.add_argument("--team", default="wsense", type=str)
+    parser.add_argument("--team", default="long-term-video", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
 
     return parser
 
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = '1'
+# os.environ["CUDA_LAUNCH_BLOCKING"] = '1'
 
 
 class TrainData(Dataset):
@@ -224,7 +226,8 @@ def main(args):
     print("effective batch size: %d" % eff_batch_size)
 
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        model = torch.nn.parallel.DataParallel(model, device_ids=[0,1,2,3])
         model_without_ddp = model.module
 
     # following timm: set wd as 0 for bias and norm layers

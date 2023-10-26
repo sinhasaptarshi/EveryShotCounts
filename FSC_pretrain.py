@@ -28,11 +28,13 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import util.lr_sched as lr_sched
 from util.FSC147 import transform_pre_train
 import models_mae_noct
+os.environ['MASTER_ADDR'] = 'localhost'
+os.environ['MASTER_PORT'] = '12355'
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=8, type=int,
+    parser.add_argument('--batch_size', default=100, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -62,7 +64,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='./data/FSC147/', type=str,
+    parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/FSC147/', type=str,
                         help='dataset path')
     parser.add_argument('--anno_file', default='annotation_FSC147_384.json', type=str,
                         help='annotation json file')
@@ -77,7 +79,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='./weights/mae_pretrain_vit_base_full.pth',  # mae_visualize_vit_base
+    parser.add_argument('--resume', default=None,  # mae_visualize_vit_base  ##'./weights/mae_pretrain_vit_base_full.pth'
                         help='resume from checkpoint')
 
     # Training parameters
@@ -90,7 +92,7 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     # Distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
+    parser.add_argument('--world_size', default=4, type=int,
                         help='number of distributed processes')
     parser.add_argument('--local_rank', default=-1, type=int)
     parser.add_argument('--dist_on_itp', action='store_true')
@@ -100,15 +102,15 @@ def get_args_parser():
     # Logging parameters
     parser.add_argument('--log_dir', default='./logs/pre_4_dir',
                         help='path where to tensorboard log')
-    parser.add_argument("--title", default="CounTR_pretraining", type=str)
+    parser.add_argument("--title", default="CounTR_pretraining_1", type=str)
     parser.add_argument("--wandb", default="counting", type=str)
-    parser.add_argument("--team", default="wsense", type=str)
+    parser.add_argument("--team", default="long-term-video", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
 
     return parser
 
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = '1'
+# os.environ["CUDA_LAUNCH_BLOCKING"] = '1'
 
 
 class TrainData(Dataset):
@@ -197,11 +199,11 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False,
     )
-
+    cur_device = torch.cuda.current_device()
     # define the model
     model = models_mae_noct.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
 
-    model.to(device)
+    model.to(cur_device)
 
     model_without_ddp = model
 
@@ -217,9 +219,12 @@ def main(args):
 
     print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
-
+    # print(args.distributed)
+    # args.gpu = [i for i in range(torch.cuda.device_count())]
+    
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[cur_device], find_unused_parameters=True)
+        model = torch.nn.parallel.DataParallel(model, device_ids=[0,1,2,3])
         model_without_ddp = model.module
 
     # following timm: set wd as 0 for bias and norm layers
@@ -262,6 +267,8 @@ def main(args):
             with torch.cuda.amp.autocast():
                 loss, pred, mask = model(samples, mask_ratio=args.mask_ratio)
 
+            loss = loss.mean()
+            # print(loss)
             loss_value = loss.item()
 
             if data_iter_step % 2000 == 0:
@@ -290,13 +297,18 @@ def main(args):
                                                      caption=f"Prediction {i} at epoch {epoch}")]
                     wandb.log({f"reconstruction": wandb_images}, step=epoch_1000x, commit=False)
 
+            # print(loss_value)
             if not math.isfinite(loss_value):
                 print("Loss is {}, stopping training".format(loss_value))
                 sys.exit(1)
 
-            loss /= accum_iter
+            # loss /= accum_iter
+            loss = loss/accum_iter
             loss_scaler(loss, optimizer, parameters=model.parameters(),
                         update_grad=(data_iter_step + 1) % accum_iter == 0)
+            # loss.backward()
+            # optimizer.step()
+
             if (data_iter_step + 1) % accum_iter == 0:
                 optimizer.zero_grad()
 
@@ -306,6 +318,8 @@ def main(args):
 
             lr = optimizer.param_groups[0]["lr"]
             metric_logger.update(lr=lr)
+
+            # print(loss)
 
             loss_value_reduce = misc.all_reduce_mean(loss_value)
             if (data_iter_step + 1) % accum_iter == 0:
