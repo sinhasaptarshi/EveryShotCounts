@@ -19,6 +19,17 @@ def main():
     dataloader = torch.utils.data.DataLoader(dataset,batch_size=1,num_workers=1,shuffle=False,pin_memory=False,drop_last=True)
     
     model = SupervisedMAE(cfg=cfg).cuda()
+    
+    state_dict = torch.load('pretrained_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+    for name, param in state_dict.items():
+        if name in model.state_dict().keys():
+            if 'decoder' not in name:
+                print(name)
+                # new_name = name.replace('quantizer.', '')
+                model.state_dict()[name].copy_(param)
+    # model.load_state_dict(state_dict, strict=False)
+    # print(state_dict.keys())
+
 
     for i, item in enumerate(tqdm(dataloader)):
         # print(item[0].shape)

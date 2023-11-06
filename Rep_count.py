@@ -161,7 +161,7 @@ class Rep_count(torch.utils.data.Dataset):
                                                                         convert_to_float=False,
                                                                         min_size = 224,
                                                                         crop_size = 224,
-                                                                        num_samples = self.num_frames,
+                                                                        num_samples = 3,
                                                                         video_mean = [0.485,0.456,0.406], 
                                                                         video_std = [0.229,0.224,0.225])
             vid = transform(vid/255.)  

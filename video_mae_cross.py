@@ -256,28 +256,28 @@ class SupervisedMAE(nn.Module):
 
         # Exemplar encoder with CNN
         self.decoder_proj1 = nn.Sequential(
-            nn.Conv3d(3, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv3d(3, 64, kernel_size=(1, 3, 3), stride=1, padding=1),
             nn.InstanceNorm3d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool3d(2,2,1) #[3,64,64]->[64,32,32]
         )
         self.decoder_proj2 = nn.Sequential(
-            nn.Conv3d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.Conv3d(64, 128, kernel_size=(1, 3, 3), stride=1, padding=1),
             nn.InstanceNorm3d(128),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(1,2,2) #[64,32,32]->[128,16,16]
+            nn.MaxPool3d(2, 2, 1) #[64,32,32]->[128,16,16]
         )
         self.decoder_proj3 = nn.Sequential(
-            nn.Conv3d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.Conv3d(128, 256, kernel_size=(1, 3, 3), stride=1, padding=1),
             nn.InstanceNorm3d(256),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(1,2,2) # [128,16,16]->[256,8,8]
+            nn.MaxPool3d(2,2,1) # [128,16,16]->[256,8,8]
         )
         self.decoder_proj4 = nn.Sequential(
             nn.Conv3d(256, decoder_embed_dim, kernel_size=3, stride=1, padding=1),
             nn.InstanceNorm3d(512),
             nn.ReLU(inplace=True),
-            # nn.AdaptiveAvgPool2d((1,1))
+            nn.AdaptiveAvgPool3d((1,1,1))
             # [256,8,8]->[512,1,1]
         )
 
@@ -348,11 +348,13 @@ class SupervisedMAE(nn.Module):
     def initialize_weights(self):
         # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.num_patches**.5), cls_token=False)
-        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+        # print(self.num_patches)
+        # pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.num_patches**.5), cls_token=False)
+        # print(pos_embed.shape)
+        # self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
         
-        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.num_patches**.5), cls_token=False)
-        self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
+        # decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.num_patches**.5), cls_token=False)
+        # self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
         w = self.patch_embed.proj.weight.data
@@ -494,15 +496,27 @@ class SupervisedMAE(nn.Module):
     def forward(self, imgs, yi, boxes=None, shot_num=0):
         # if boxes.nelement() > 0:
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
+        y1 = []
         with torch.no_grad():
             latent, _ = self._mae_forward_encoder(imgs)
-            # print(latent.shape)
+            latent = latent[:, 1:]
             # print(_)
+        x = self.decoder_embed(latent)
+        x = x + self.decoder_pos_embed
+        print(x.shape)
         yi = self.decoder_proj1(yi)
-        # yi = self.decoder_proj2(yi)
-        # yi = self.decoder_proj3(yi)
-        # yi = self.decoder_proj4(yi)
+        yi = self.decoder_proj2(yi)
+        yi = self.decoder_proj3(yi)
+        yi = self.decoder_proj4(yi)
         print(yi.shape)
+
+        N, C, _, _, _ = yi.shape
+        y1.append(yi.squeeze(-1).squeeze(-1).squeeze(-1)) 
+        y = torch.cat(y1,dim=0).reshape(1,N,C).to(x.device)
+        for blk in self.decoder_blocks:
+            x = blk(x, y)
+        x = self.decoder_norm(x)
+        print(x.shape)
         # pred = self.forward_decoder(latent, boxes, shot_num)  # [N, 384, 384]
         return latent
 
