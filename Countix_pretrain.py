@@ -30,7 +30,7 @@ import util.lr_sched as lr_sched
 from util.FSC147 import transform_pre_train
 from Countix import Countix
 import models_mae_noct
-from video_mae_noact import video_mae_vit
+from video_mae_noact import MaskMViT
 from losses import MultipleMSELoss
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = '12355'
@@ -89,7 +89,7 @@ def get_args_parser():
     # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=8, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -102,6 +102,8 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+    
+    parser.add_argument('--num_gpus', default=1, type=int, help='number of gpus')
 
     # Logging parameters
     parser.add_argument('--log_dir', default='./logs/pre_4_dir',
@@ -198,8 +200,8 @@ def main(args, cfg=None):
                 tags=["CounTR", "pretraining"],
                 id=args.wandb_id,
             )
-        else:
-            wandb_run = None
+    else:
+        wandb_run = None
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -210,7 +212,7 @@ def main(args, cfg=None):
     )
     cur_device = torch.cuda.current_device()
     # define the model
-    model = video_mae_vit(cfg)
+    model = MaskMViT(cfg)
 
     model.to(cur_device)
 
@@ -230,16 +232,18 @@ def main(args, cfg=None):
 
     print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
+    device_ids = [i for i in range(args.num_gpus)]
     # print(args.distributed)
     # args.gpu = [i for i in range(torch.cuda.device_count())]
     
     # if args.distributed:
         # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[cur_device], find_unused_parameters=True)
-    model = torch.nn.parallel.DataParallel(model, device_ids=[0,1])
-    model_without_ddp = model.module
+    model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
+    # model_without_ddp = model.module
+    model_without_ddp = model
 
     # following timm: set wd as 0 for bias and norm layers
-    param_groups = optim_factory.add_weight_decay(model_without_ddp, args.weight_decay)
+    param_groups = optim_factory.add_weight_decay(model, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     print(optimizer)
     loss_scaler = NativeScaler()
@@ -257,7 +261,7 @@ def main(args, cfg=None):
         metric_logger = misc.MetricLogger(delimiter="  ")
         metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
         header = 'Epoch: [{}]'.format(epoch)
-        print_freq = 20
+        print_freq = 40
         accum_iter = args.accum_iter
 
         optimizer.zero_grad()
@@ -270,20 +274,23 @@ def main(args, cfg=None):
         for data_iter_step, samples  in enumerate(metric_logger.log_every(data_loader_train, print_freq, header)):
             epoch_1000x = int((data_iter_step / len(data_loader_train) + epoch) * 1000)
             samples = samples[0]
-            print(samples.shape)
+            # samples = samples.as
+            # print(samples.shape)
             if data_iter_step % accum_iter == 0:
                 lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader_train) + epoch, args)
             # samples = samples.unsqueeze(0)
-            samples = samples.to(device, non_blocking=True)
+            # samples = samples.to(device, non_blocking=True)
+            samples = samples.cuda(non_blocking=True)
 
-            # with torch.cuda.amp.autocast():
+            with torch.cuda.amp.autocast():
             #     # loss, pred, mask = model(samples, mask_ratio=args.mask_ratio)
             #     preds, labels = model(samples)
-            preds, labels = model(samples)
+                # preds, labels = model(samples)
+                loss = model([samples])
             
-            loss, _ = loss_fun(preds, labels)
+            # loss, _ = loss_fun(preds, labels)
             loss = loss.mean()
-            print(loss)
+            # print(loss)
             # print(loss)
             loss_value = loss.item()
 

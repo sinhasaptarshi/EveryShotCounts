@@ -12,6 +12,7 @@ from slowfast.models.attention import MultiScaleBlock
 import slowfast.utils.misc as misc
 from slowfast.models import head_helper
 from slowfast.models.attention import attention_pool
+from losses import MultipleMSELoss
 from slowfast.models.utils import (
     calc_mvit_feature_geometry,
     get_3d_sincos_pos_embed,
@@ -499,6 +500,7 @@ class MaskMViT(MViT):
 
         self.head_type = cfg.MASK.HEAD_TYPE.split("_")
         feat_sz = [self.feat_size[depth] for depth in self.pretrain_depth]
+        self.multimse_loss = MultipleMSELoss()
         if self.head_type[0] == "separate":
             if not cfg.MASK.PRED_HOG:
                 pred_t_sz = (
@@ -965,7 +967,8 @@ class MaskMViT(MViT):
         self.counter += 1
         if self.cfg.VIS_MASK.ENABLE:
             return self._mae_visualize(imgs, pred, mask)
-        return pred, labels
+        loss, _ = self.multimse_loss(pred, labels)
+        return loss
 
     def _mae_visualize(self, imgs, pred, mask):
         N, T, H, W, p, u, t, h, w = self.patch_info
@@ -1115,6 +1118,8 @@ class MaskMViT(MViT):
         else:
             x, mask = x[0], None
 
+        # mask = None
+
         if self.cfg.MASK.MAE_ON:
             return self._mae_forward(
                 x, mask_ratio=self.cfg.AUG.MASK_RATIO, mask=mask
@@ -1124,9 +1129,9 @@ class MaskMViT(MViT):
         
 
 
-def video_mae_vit(cfg):
-    model = MaskMViT(cfg)
-    return model
+# def video_mae_vit(cfg):
+#     model = MaskMViT(cfg)
+#     return model
 
 
 # video_mae_vit_huge_patch14 = video_mae_vit_huge_patch14_dec512d8b
