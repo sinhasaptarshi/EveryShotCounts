@@ -124,7 +124,7 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_segment(self, time_points, min_frames=3, num_frames=64, sample_empty=False):
+    def get_vid_segment(self, time_points, min_frames=3, num_frames=64, sample_breaks=False):
         """ 
         get_vid_segment. 
         
@@ -223,7 +223,7 @@ class Rep_count(torch.utils.data.Dataset):
             if exemplar is not None:
                 exemplar = transform_exemplar(exemplar/255) 
             # print(vid)
-            density_label = torch.Tensor(self.preprocess(duration*fps, cycle, 64))
+            density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
             
         except Exception:
             return (False)

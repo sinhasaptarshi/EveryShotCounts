@@ -256,22 +256,22 @@ class SupervisedMAE(nn.Module):
 
         # Exemplar encoder with CNN
         self.decoder_proj1 = nn.Sequential(
-            nn.Conv3d(3, 64, kernel_size=(1, 3, 3), stride=1, padding=1),
+            nn.Conv3d(3, 64, kernel_size=3, stride=1, padding=1),
             nn.InstanceNorm3d(64),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(2,2,1) #[3,64,64]->[64,32,32]
+            nn.MaxPool3d((1,2,2)) #[3,64,64]->[64,32,32]
         )
         self.decoder_proj2 = nn.Sequential(
-            nn.Conv3d(64, 128, kernel_size=(1, 3, 3), stride=1, padding=1),
+            nn.Conv3d(64, 128, kernel_size=3, stride=1, padding=1),
             nn.InstanceNorm3d(128),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(2, 2, 1) #[64,32,32]->[128,16,16]
+            nn.MaxPool3d((1, 2, 2)) #[64,32,32]->[128,16,16]
         )
         self.decoder_proj3 = nn.Sequential(
-            nn.Conv3d(128, 256, kernel_size=(1, 3, 3), stride=1, padding=1),
+            nn.Conv3d(128, 256, kernel_size=3, stride=1, padding=1),
             nn.InstanceNorm3d(256),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(2,2,1) # [128,16,16]->[256,8,8]
+            nn.MaxPool3d((1, 2, 2)) # [128,16,16]->[256,8,8]
         )
         self.decoder_proj4 = nn.Sequential(
             nn.Conv3d(256, decoder_embed_dim, kernel_size=3, stride=1, padding=1),
@@ -288,29 +288,50 @@ class SupervisedMAE(nn.Module):
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
         # Density map regresssion module
-        self.decode_head0 = nn.Sequential(
-            nn.Conv2d(decoder_embed_dim, 256, kernel_size=3, stride=1, padding=1),
-            nn.GroupNorm(8, 256),
-            nn.ReLU(inplace=True)
-        )
-        self.decode_head1 = nn.Sequential(
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            nn.GroupNorm(8, 256),
-            nn.ReLU(inplace=True)
-        )
-        self.decode_head2 = nn.Sequential(
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            nn.GroupNorm(8, 256),
-            nn.ReLU(inplace=True)
-        )
-        self.decode_head3 = nn.Sequential(
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            nn.GroupNorm(8, 256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 1, kernel_size=1, stride=1)
-        )  
+        # self.decode_head0 = nn.Sequential(
+        #     nn.Conv2d(decoder_embed_dim, 256, kernel_size=3, stride=1, padding=1),
+        #     nn.GroupNorm(8, 256),
+        #     nn.ReLU(inplace=True)
+        # )
+        # self.decode_head1 = nn.Sequential(
+        #     nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+        #     nn.GroupNorm(8, 256),
+        #     nn.ReLU(inplace=True)
+        # )
+        # self.decode_head2 = nn.Sequential(
+        #     nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+        #     nn.GroupNorm(8, 256),
+        #     nn.ReLU(inplace=True)
+        # )
+        # self.decode_head3 = nn.Sequential(
+        #     nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+        #     nn.GroupNorm(8, 256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(256, 1, kernel_size=1, stride=1)
+        # )  
     
         # --------------------------------------------------------------------------
+
+        self.decode_head0 = nn.Sequential(
+            nn.Conv3d(decoder_embed_dim, 256, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(8, 256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d((1,2,2))
+        )
+        self.decode_head1 = nn.Sequential(
+            nn.Conv3d(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(8, 256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d((1,2,2))
+        )
+        self.decode_head2 = nn.Sequential(
+            nn.Conv3d(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(8, 256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d((1,2,2)),
+            nn.Conv3d(256, 1, kernel_size=1, stride=1)
+        )  
+        self.temporal_map = nn.Linear(self.patch_dims[0], cfg.DATA.NUM_FRAMES)
 
         self.norm_pix_loss = norm_pix_loss
 
@@ -442,56 +463,56 @@ class SupervisedMAE(nn.Module):
         return x, thw
 
 
-    def forward_decoder(self, x, y_, shot_num=3):
-        # embed tokens
-        x = self.decoder_embed(x)
-        # add pos embed
-        x = x + self.decoder_pos_embed
+    # def forward_decoder(self, x, y_, shot_num=3):
+    #     # embed tokens
+    #     x = self.decoder_embed(x)
+    #     # add pos embed
+    #     x = x + self.decoder_pos_embed
 
-        # Exemplar encoder
-        y_ = y_.transpose(0,1) # y_ [N,3,3,64,64]->[3,N,3,64,64]
-        y1=[]
-        C=0
-        N=0
-        cnt = 0
-        for yi in y_:
-            cnt+=1
-            if cnt > shot_num:
-                break
-            yi = self.decoder_proj1(yi)
-            yi = self.decoder_proj2(yi)
-            yi = self.decoder_proj3(yi)
-            yi = self.decoder_proj4(yi)
-            N, C,_,_ = yi.shape
-            y1.append(yi.squeeze(-1).squeeze(-1)) # yi [N,C,1,1]->[N,C]       
+    #     # Exemplar encoder
+    #     y_ = y_.transpose(0,1) # y_ [N,3,3,64,64]->[3,N,3,64,64]
+    #     y1=[]
+    #     C=0
+    #     N=0
+    #     cnt = 0
+    #     for yi in y_:
+    #         cnt+=1
+    #         if cnt > shot_num:
+    #             break
+    #         yi = self.decoder_proj1(yi)
+    #         yi = self.decoder_proj2(yi)
+    #         yi = self.decoder_proj3(yi)
+    #         yi = self.decoder_proj4(yi)
+    #         N, C,_,_ = yi.shape
+    #         y1.append(yi.squeeze(-1).squeeze(-1)) # yi [N,C,1,1]->[N,C]       
             
-        if shot_num > 0:
-            y = torch.cat(y1,dim=0).reshape(shot_num,N,C).to(x.device)
-        else:
-            y = self.shot_token.repeat(y_.shape[1],1).unsqueeze(0).to(x.device)
-        y = y.transpose(0,1) # y [3,N,C]->[N,3,C]
+    #     if shot_num > 0:
+    #         y = torch.cat(y1,dim=0).reshape(shot_num,N,C).to(x.device)
+    #     else:
+    #         y = self.shot_token.repeat(y_.shape[1],1).unsqueeze(0).to(x.device)
+    #     y = y.transpose(0,1) # y [3,N,C]->[N,3,C]
         
-        # apply Transformer blocks
-        for blk in self.decoder_blocks:
-            x = blk(x, y)
-        x = self.decoder_norm(x)
+    #     # apply Transformer blocks
+    #     for blk in self.decoder_blocks:
+    #         x = blk(x, y)
+    #     x = self.decoder_norm(x)
         
-        # Density map regression
-        n, hw, c = x.shape
-        h = w = int(math.sqrt(hw))
-        x = x.transpose(1, 2).reshape(n, c, h, w)
+    #     # Density map regression
+    #     n, hw, c = x.shape
+    #     h = w = int(math.sqrt(hw))
+    #     x = x.transpose(1, 2).reshape(n, c, h, w)
 
-        x = F.interpolate(
-                        self.decode_head0(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = F.interpolate(
-                        self.decode_head1(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = F.interpolate(
-                        self.decode_head2(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = F.interpolate(
-                        self.decode_head3(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = x.squeeze(-3)
+    #     x = F.interpolate(
+    #                     self.decode_head0(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+    #     x = F.interpolate(
+    #                     self.decode_head1(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+    #     x = F.interpolate(
+    #                     self.decode_head2(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+    #     x = F.interpolate(
+    #                     self.decode_head3(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+    #     x = x.squeeze(-3)
 
-        return x
+    #     return x
 
     def forward(self, imgs, yi, boxes=None, shot_num=0):
         # if boxes.nelement() > 0:
@@ -503,22 +524,37 @@ class SupervisedMAE(nn.Module):
             # print(_)
         x = self.decoder_embed(latent)
         x = x + self.decoder_pos_embed
-        print(x.shape)
+        # print(x.shape)
         yi = self.decoder_proj1(yi)
         yi = self.decoder_proj2(yi)
         yi = self.decoder_proj3(yi)
         yi = self.decoder_proj4(yi)
-        print(yi.shape)
+        # print(yi.shape)
 
         N, C, _, _, _ = yi.shape
         y1.append(yi.squeeze(-1).squeeze(-1).squeeze(-1)) 
         y = torch.cat(y1,dim=0).reshape(1,N,C).to(x.device)
+        y = y.transpose(0,1)
         for blk in self.decoder_blocks:
             x = blk(x, y)
         x = self.decoder_norm(x)
-        print(x.shape)
+
+        n, thw, c = x.shape
+        
+        t = self.patch_dims[0]
+
+        h = w = int(math.sqrt(thw/t))
+        x = x.transpose(1, 2).reshape(n, c, t, h, w)
+        # print(x.shape)
+        x = self.decode_head0(x)
+        x = self.decode_head1(x)
+        x = self.decode_head2(x)
+        x = x.squeeze(-1).squeeze(-1)
+        x = self.temporal_map(x)
+
+        # print(x.shape)
         # pred = self.forward_decoder(latent, boxes, shot_num)  # [N, 384, 384]
-        return latent
+        return x.squeeze(1)
 
 
 # def mae_vit_base_patch16_dec512d8b(**kwargs):
