@@ -123,6 +123,61 @@ class Rep_count(torch.utils.data.Dataset):
         # print(label)
 
         return label
+    
+    def get_vid_segment(self, time_points, min_frames=3, num_frames=64, sample_empty=False):
+        """ 
+        get_vid_segment. 
+        
+        Find the keyframes to sample from given: the number of frames to sample, a minimum number of frames per repetition,
+        and if to also sample over video segments that no repetitions occur.
+
+        Args:
+            time_points (list): list containing all the start and end iteration kepoints in the format [<start loop 1> , <end loop 1> , <start loop 2>, etc.]
+            min_frames (int, optional): The minimum number of frames to sample per repetition. Defaults to 3.
+            num_frames (int, optional): The number of frames to sample. Defaults to 64.
+            sample_empty (bool, optional): Boolean flag to either sample over segments without repetitins (between end and start).
+
+        Returns:
+            tuple: containing the list of frame indices
+        """
+        
+        if sample_breaks: # Flag for sampling in transitioning segments between repetitions
+            reps = {}
+            for idx,i in enumerate(range(0,len(time_points),1)) :
+                if time_points[i] < time_points[i+1]:
+                    if i % 2 == 0: # Segment is between a start and end of a repetition
+                        reps[idx] = {'start':time_points[i], 'end':time_points[i+1], 'is_rep':True}
+                    else:
+                        reps[idx] = {'start':time_points[i], 'end':time_points[i+1], 'is_rep':False}
+        else:
+            reps = {idx:{'start':time_points[i], 'end':time_points[i+1], 'is_rep':True} for idx,i in enumerate(range(0,len(time_points),2))}
+        
+        if int(time_points[-1]) - int(time_points[0]) > num_frames : # video has >= 64 frames
+            counts = num_frames//min_frames # get the maximum number of repetitions that can be observed based on min_frames
+            
+            if len(reps) > counts : # the number of repetitions that can be sampled is less than the ground truth reps
+                start_idx = random.randint(0, len(reps) - counts) # get (a random) start index
+                n_reps = {i:reps[i] for i  in range(start_idx,start_idx+counts)}
+            else: # the number of repetitions that can be sampled is more than the ground truth reps
+                start_idx = 0
+                min_frames = num_frames // len(reps)
+                n_reps = reps
+        else:
+            n_reps = reps
+            counts = len(n_reps)
+        
+        rep_counts = 0
+        for idx in n_reps: # Adjust the counts based on the number of observable repetitions
+            if n_reps[idx]['is_rep']:
+                rep_counts += 1
+
+        indices = [] # frame indices to sample
+        for val in n_reps.values():
+            for v in np.sort(np.random.randint(int(val['start']),int(val['end']),size=min_frames)):
+                indices.append(v)
+                  
+        return indices, rep_counts
+    
 
     def __getitem__(self, index):
         
