@@ -514,12 +514,12 @@ class SupervisedMAE(nn.Module):
 
     #     return x
 
-    def forward(self, imgs, yi, boxes=None, shot_num=0):
+    def forward(self, vid, yi, boxes=None, shot_num=0):
         # if boxes.nelement() > 0:
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
         y1 = []
         with torch.no_grad():
-            latent, _ = self._mae_forward_encoder(imgs)
+            latent, _ = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
             latent = latent[:, 1:]
             # print(_)
         x = self.decoder_embed(latent)
@@ -528,7 +528,7 @@ class SupervisedMAE(nn.Module):
         yi = self.decoder_proj1(yi)
         yi = self.decoder_proj2(yi)
         yi = self.decoder_proj3(yi)
-        yi = self.decoder_proj4(yi)
+        yi = self.decoder_proj4(yi)  ### (B, 512, 1, 1, 1)
         # print(yi.shape)
 
         N, C, _, _, _ = yi.shape
@@ -536,7 +536,7 @@ class SupervisedMAE(nn.Module):
         y = torch.cat(y1,dim=0).reshape(1,N,C).to(x.device)
         y = y.transpose(0,1)
         for blk in self.decoder_blocks:
-            x = blk(x, y)
+            x = blk(x, y)  ### feature interaction model
         x = self.decoder_norm(x)
 
         n, thw, c = x.shape
@@ -546,9 +546,9 @@ class SupervisedMAE(nn.Module):
         h = w = int(math.sqrt(thw/t))
         x = x.transpose(1, 2).reshape(n, c, t, h, w)
         # print(x.shape)
-        x = self.decode_head0(x)
+        x = self.decode_head0(x)  
         x = self.decode_head1(x)
-        x = self.decode_head2(x)
+        x = self.decode_head2(x)  ### (B, 1, 8, 1, 1)
         x = x.squeeze(-1).squeeze(-1)
         x = self.temporal_map(x)
 

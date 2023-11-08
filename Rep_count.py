@@ -80,10 +80,14 @@ class Rep_count(torch.utils.data.Dataset):
         self.add_noise = add_noise # add noise to frames (augmentation)
         csv_path = f"/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
+        self.df = self.df[self.df['count'].notna()]
+        self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
+        print(len(self.df))
         if cfg is not None:
             self.num_frames = cfg.DATA.NUM_FRAMES
         else:
             self.num_frames = 16
+        
         
         # to_remove = []
         # for i,row in tqdm(self.df.iterrows()): # iteration to remove:
@@ -188,6 +192,7 @@ class Rep_count(torch.utils.data.Dataset):
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])]
         starts = cycle[0::2]
         ends = cycle[1::2]
+        # assert len(starts) != 0
         exemplar_index = random.randint(0, len(starts)-1)
         exemplar_start = starts[exemplar_index]/fps  ## divide by fps tp convert to secs
         exemplar_end = ends[exemplar_index]/fps
@@ -205,14 +210,14 @@ class Rep_count(torch.utils.data.Dataset):
             # exemplar = read_video(video_name, exemplar_start, exemplar_end)
             # print(vid)
         
-            transform =  pytorchvideo.transforms.create_video_transform(mode='train',
+            transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
                                                                         convert_to_float=False,
                                                                         min_size = 224,
                                                                         crop_size = 224,
                                                                         num_samples = self.num_frames,
                                                                         video_mean = [0.485,0.456,0.406], 
                                                                         video_std = [0.229,0.224,0.225])
-            transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode='train',
+            transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode=self.split,
                                                                         convert_to_float=False,
                                                                         min_size = 224,
                                                                         crop_size = 224,
