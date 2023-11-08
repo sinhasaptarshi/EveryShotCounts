@@ -138,7 +138,7 @@ class Rep_count(torch.utils.data.Dataset):
             sample_empty (bool, optional): Boolean flag to either sample over segments without repetitins (between end and start).
 
         Returns:
-            tuple: containing the list of frame indices
+            tuple: containing the list of frame indices, the new count based on the sample segment, and a (unscaled) density matrix based on the start and end indices sampled.
         """
         
         if sample_breaks: # Flag for sampling in transitioning segments between repetitions
@@ -175,8 +175,20 @@ class Rep_count(torch.utils.data.Dataset):
         for val in n_reps.values():
             for v in np.sort(np.random.randint(int(val['start']),int(val['end']),size=min_frames)):
                 indices.append(v)
+                
+        prox_to_mean = [] # list to store gaussians based on repetitions start/end for density map
+        for t in range(time_points[0],time_points[-1]):
+            is_rep = False # flag to keep track if the timestamp falls within a loop
+            for key in reps.keys():
+                if reps[key]['start'] <= t and reps[key]['end'] >= t and  reps[key]['is_rep'] : # only assign a >= 0 value if the timestamp is within a loop
+                    is_rep =True
+                    mean = float(reps[key]['start']) + (float(reps[key]['end']) - float(reps[key]['start']))/2
+                    prox_to_mean.append(abs(abs(float(t)-mean)/(mean-reps[key]['start'])-1)) # calculate the absolute distance to the mean (regularised)
+                    break
+            if not is_rep: # add zeros for not repetitions
+                prox_to_mean.append(0)
                   
-        return indices, rep_counts
+        return indices, rep_counts, prox_to_mean[indices[0]:indices[-1]]
     
 
     def __getitem__(self, index):
