@@ -12,6 +12,7 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from label_norm import normalize_label
+from pytorchvideo.data.utils import thwc_to_cthw
 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import CenterCropVideo, NormalizeVideo
@@ -24,6 +25,52 @@ from pytorchvideo.transforms import (
     Div255
 )
 from pytorchvideo.data.encoded_video import EncodedVideo
+
+def read_video_timestamps(video_filename, timestamps):
+    """ 
+    summary
+
+    Args:
+        video_filename (string): full filepath of the video
+        timestamps (list): list of ints for the temporal points to load from the file
+
+    Returns:
+        frames: tensor of shape C x T x H x W
+        totfps: float for the video segment length (in secs)
+    """
+    try:
+        assert os.path.isfile(video_filename), f"VideoLoader: {video_filename} does not exist"
+    except:
+        print(f"{video_filename} does not exist")
+    video = EncodedVideo.from_path(video_filename) # load video with pytorchvideo dataset
+    frames = {}
+    fs = video._container.decode(**{"video":0}) # get a stream of frames
+
+
+    
+    # print(timestamps)
+    for iter, f in enumerate(fs):
+        # print(f.pts)
+        # if f.pts in timestamps: # check if timestamp is within given list
+        #     frames[f.pts] = f
+        if iter in timestamps:
+            frames[iter] = f
+        elif iter > timestamps[-1]:
+            break
+        # elif f.pts > timestamps[-1]:
+        #     break
+
+    result = [frames[pts] for pts in sorted(frames)] # rearrange
+    print(torch.from_numpy(result[1].to_ndarray(format='rgb24')).shape)
+    
+
+    video_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in result] # list of length T with items size [H x W x 3] 
+    print(video_frames.shape)
+    
+    frames = thwc_to_cthw(torch.stack(video_frames)).to(torch.float32) # C x T x H x W
+    
+    return frames, len(fs)
+
 
 
 
@@ -218,6 +265,17 @@ class Rep_count(torch.utils.data.Dataset):
             jitter = max(math.floor((end - start) / (2*count)),0)
             start += jitter 
         try:
+
+            frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
+            # print(frame_idx)
+            vid , num_frames = read_video_timestamps(video_name, frame_idx)
+
+            labels = normalize_label(cycle, num_frames)
+            density = labels[frame_idx]
+            print(density.shape)
+            print(density.sum())
+            print(count)
+
             vid, exemplar = read_video(video_name,0,duration, exemplar_start=exemplar_start, exemplar_end=exemplar_end)
             # exemplar = read_video(video_name, exemplar_start, exemplar_end)
             # print(vid)
