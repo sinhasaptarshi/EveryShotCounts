@@ -85,7 +85,7 @@ def get_args_parser():
                         help='path where to tensorboard log')
     parser.add_argument("--title", default="CounTR_finetuning", type=str)
     parser.add_argument("--wandb", default="counting", type=str)
-    parser.add_argument("--team", default="long-term-video", type=str)
+    parser.add_argument("--team", default="repetition_counting", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
 
     return parser
