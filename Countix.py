@@ -22,7 +22,41 @@ from pytorchvideo.transforms import (
     Div255
 )
 from pytorchvideo.data.encoded_video import EncodedVideo
+from pytorchvideo.data.utils import thwc_to_cthw
 
+
+
+def read_video_timestamps(video_filename, timestamps):
+    """ 
+    summary
+
+    Args:
+        video_filename (string): full filepath of the video
+        timestamps (list): list of ints for the temporal points to load from the file
+
+    Returns:
+        frames: tensor of shape C x T x H x W
+        totfps: float for the video segment length (in secs)
+    """
+    try:
+        assert os.path.isfile(video_filename), f"VideoLoader: {video_filename} does not exist"
+    except:
+        print(f"{video_filename} does not exist")
+    video = EncodedVideo.from_path(video_filename) # load video with pytorchvideo dataset
+    frames = {}
+    fs = video._container.decode(**{"video":0}) # get a stream of frames
+    for f in fs:
+        if f.pts in timestamps: # check if timestamp is within given list
+            frames[f.pts] = f
+        elif f.pts > timestamps[-1]:
+            break
+
+    result = [frames[pts] for pts in sorted(frames)] # rearrange
+    video_frames = [torch.from_numpy(f.to_rgb().to_ndarray()) for f in result] # list of length T with items size [H x W x 3] 
+    
+    frames = thwc_to_cthw(torch.stack(video_frames)).to(torch.float32) # C x T x H x W
+    
+    return frames#, totfs
 
 
 
