@@ -177,7 +177,7 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_segment(self, time_points, min_frames=3, num_frames=16, sample_breaks=False):
+    def get_vid_segment(self, time_points, min_frames=3, num_frames=16, sample_breaks=False, use_softmax=True):
         """ 
         get_vid_segment. 
         
@@ -189,6 +189,7 @@ class Rep_count(torch.utils.data.Dataset):
             min_frames (int, optional): The minimum number of frames to sample per repetition. Defaults to 3.
             num_frames (int, optional): The number of frames to sample. Defaults to 64.
             sample_empty (bool, optional): Boolean flag to either sample over segments without repetitins (between end and start).
+            use_softmax (bool, option): Bolean flag to either weight loop segments by their softmax. Is set to `True` the sum of each loop segment within the density map should be 1.
 
         Returns:
             tuple: containing the list of frame indices, the new count based on the sample segment, and a (unscaled) density matrix based on the start and end indices sampled.
@@ -243,6 +244,15 @@ class Rep_count(torch.utils.data.Dataset):
                     break
             if not is_rep: # add zeros for not repetitions
                 prox_to_mean.append(0)
+                
+        if use_softmax: # weight by softmax at each segment locations
+            for key in reps.keys():
+                tot = 0
+                for idx in range(reps[key]['start']-time_points[0],reps[key]['end']-time_points[0]): # first for loop to calculate exponent per item
+                    prox_to_mean[idx] = math.exp(prox_to_mean[idx])
+                    tot += prox_to_mean[idx]
+                for idx in range(reps[key]['start']-time_points[0],reps[key]['end']-time_points[0]): # second for loop for softmax
+                    prox_to_mean[idx] /= tot
                   
         return indices, rep_counts, prox_to_mean[indices[0]:indices[-1]]
     
