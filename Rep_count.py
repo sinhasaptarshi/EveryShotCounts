@@ -26,7 +26,7 @@ from pytorchvideo.transforms import (
 )
 from pytorchvideo.data.encoded_video import EncodedVideo
 
-def read_video_timestamps(video_filename, timestamps):
+def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
     """ 
     summary
 
@@ -44,6 +44,7 @@ def read_video_timestamps(video_filename, timestamps):
         print(f"{video_filename} does not exist")
     video = EncodedVideo.from_path(video_filename) # load video with pytorchvideo dataset
     frames = {}
+    exemplar_frames = []
     fs = video._container.decode(**{"video":0}) # get a stream of frames
 
 
@@ -53,6 +54,8 @@ def read_video_timestamps(video_filename, timestamps):
         # print(f.pts)
         # if f.pts in timestamps: # check if timestamp is within given list
         #     frames[f.pts] = f
+        if iter in exemplar_timestamps:
+            exemplar_frames.append(f)
         if iter in timestamps:
             frames[iter] = f
         elif iter > timestamps[-1]:
@@ -61,18 +64,17 @@ def read_video_timestamps(video_filename, timestamps):
         #     break
 
     result = [frames[pts] for pts in sorted(frames)] # rearrange
-    print(torch.from_numpy(result[1].to_ndarray(format='rgb24')).shape)
+    # print(torch.from_numpy(result[1].to_ndarray(format='rgb24')).shape)
     
 
     video_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in result] # list of length T with items size [H x W x 3] 
-    print(video_frames.shape)
-    
-    frames = thwc_to_cthw(torch.stack(video_frames)).to(torch.float32) # C x T x H x W
-    
-    return frames, len(fs)
-
-
-
+    video_frames = thwc_to_cthw(torch.stack(video_frames).to(torch.float32))
+    # print(video_frames.shape)
+    exemplar_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in exemplar_frames]
+    exemplar_frames = thwc_to_cthw(torch.stack(exemplar_frames).to(torch.float32))
+    # frames = thwc_to_cthw(torch.stack(video_frames)).to(torch.float32) # C x T x H x W
+    # print(video_frames.shape)
+    return video_frames, exemplar_frames, timestamps[-1]
 
 
 def read_video(video_filename, start, end, exemplar_start=None, exemplar_end=None):
@@ -175,7 +177,7 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_segment(self, time_points, min_frames=3, num_frames=64, sample_breaks=False):
+    def get_vid_segment(self, time_points, min_frames=3, num_frames=16, sample_breaks=False):
         """ 
         get_vid_segment. 
         
@@ -223,7 +225,10 @@ class Rep_count(torch.utils.data.Dataset):
                 rep_counts += 1
 
         indices = [] # frame indices to sample
+
         for val in n_reps.values():
+            if val['start'] == val['end']:
+                val['end'] += 2
             for v in np.sort(np.random.randint(int(val['start']),int(val['end']),size=min_frames)):
                 indices.append(v)
                 
@@ -253,55 +258,63 @@ class Rep_count(torch.utils.data.Dataset):
         ends = cycle[1::2]
         # assert len(starts) != 0
         exemplar_index = random.randint(0, len(starts)-1)
-        exemplar_start = starts[exemplar_index]/fps  ## divide by fps tp convert to secs
-        exemplar_end = ends[exemplar_index]/fps
+        exemplar_start = starts[exemplar_index]  ## divide by fps tp convert to secs
+        exemplar_end = ends[exemplar_index]
+        exemplar_frameidx = np.random.randint(exemplar_start, exemplar_end, 3)
         # print(video_name)
         # start = abs(float(self.df.iloc[index]['repetition_start']))#-float(s))
         # end = abs(float(self.df.iloc[index]['repetition_end']))#-float(s))
         
-        count = float(self.df.iloc[index]['count'])
+        original_count = float(self.df.iloc[index]['count'])
+        
             
         if self.jittering:
             jitter = max(math.floor((end - start) / (2*count)),0)
             start += jitter 
-        try:
-
-            frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
-            # print(frame_idx)
-            vid , num_frames = read_video_timestamps(video_name, frame_idx)
-
-            labels = normalize_label(cycle, num_frames)
-            density = labels[frame_idx]
-            print(density.shape)
-            print(density.sum())
-            print(count)
-
-            vid, exemplar = read_video(video_name,0,duration, exemplar_start=exemplar_start, exemplar_end=exemplar_end)
-            # exemplar = read_video(video_name, exemplar_start, exemplar_end)
-            # print(vid)
+        # try:
+        # print(cycle)
+        frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
+        # print(frame_idx)
+        vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)
+        # print(vid.shape)
+        # print(exemplar.shape)
+        # print(num_frames)
         
-            transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
-                                                                        convert_to_float=False,
-                                                                        min_size = 224,
-                                                                        crop_size = 224,
-                                                                        num_samples = self.num_frames,
-                                                                        video_mean = [0.485,0.456,0.406], 
-                                                                        video_std = [0.229,0.224,0.225])
-            transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode=self.split,
-                                                                        convert_to_float=False,
-                                                                        min_size = 224,
-                                                                        crop_size = 224,
-                                                                        num_samples = 3,
-                                                                        video_mean = [0.485,0.456,0.406], 
-                                                                        video_std = [0.229,0.224,0.225])
-            vid = transform(vid/255.)  
-            if exemplar is not None:
-                exemplar = transform_exemplar(exemplar/255) 
-            # print(vid)
-            density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
-            
-        except Exception:
-            return (False)
+        label = normalize_label(cycle, cycle[-1])
+        # print(original_count, label.sum())
+        density = label[frame_idx] 
+        density = density / density.sum() * count  ### normalizing density to sum up to count
+        print(density)
+        print(count, density.sum())
+        # print(density)
+        # print(count)
+
+        # vid, exemplar = read_video(video_name,0,duration, exemplar_start=exemplar_start, exemplar_end=exemplar_end)
+        # exemplar = read_video(video_name, exemplar_start, exemplar_end)
+        # print(vid)
+    
+        transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
+                                                                    convert_to_float=False,
+                                                                    min_size = 224,
+                                                                    crop_size = 224,
+                                                                    num_samples = None,
+                                                                    video_mean = [0.485,0.456,0.406], 
+                                                                    video_std = [0.229,0.224,0.225])
+        transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode=self.split,
+                                                                    convert_to_float=False,
+                                                                    min_size = 224,
+                                                                    crop_size = 224,
+                                                                    num_samples = 3,
+                                                                    video_mean = [0.485,0.456,0.406], 
+                                                                    video_std = [0.229,0.224,0.225])
+        vid = transform(vid/255.)  
+        if exemplar is not None:
+            exemplar = transform_exemplar(exemplar/255) 
+        # print(vid)
+        density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
+        
+        # except Exception:
+        #     return (False)
         return vid, exemplar, density_label, count, video_name
             
 
@@ -319,10 +332,11 @@ if __name__=='__main__':
     dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=2,shuffle=False,pin_memory=False,drop_last=True)
     
     for i, item in enumerate(tqdm(dataloader)):
-        print(i,item[0].shape)
-        print(i, item[1].shape)
-        print(i, item[2].shape)
-        print(item[2])
+        print(i)
+        # print(i,item[0].shape)
+        # print(i, item[1].shape)
+        # print(i, item[2].shape)
+        # print(item[2])
     
         
     
