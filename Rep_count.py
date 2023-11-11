@@ -70,7 +70,7 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
     video_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in result] # list of length T with items size [H x W x 3] 
     video_frames = thwc_to_cthw(torch.stack(video_frames).to(torch.float32))
     # print(video_frames.shape)
-    exemplar_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in exemplar_frames]
+    exemplar_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in exemplar_frames]  ### example reps
     exemplar_frames = thwc_to_cthw(torch.stack(exemplar_frames).to(torch.float32))
     # frames = thwc_to_cthw(torch.stack(video_frames)).to(torch.float32) # C x T x H x W
     # print(video_frames.shape)
@@ -280,9 +280,9 @@ class Rep_count(torch.utils.data.Dataset):
         # print(exemplar.shape)
         # print(num_frames)
         
-        label = normalize_label(cycle, cycle[-1])
+        label = normalize_label(cycle, cycle[-1]) ## computing density map over entire video
         # print(original_count, label.sum())
-        density = label[frame_idx] 
+        density = label[frame_idx] ## sampling the density map at the selected frame indices
         density = density / density.sum() * count  ### normalizing density to sum up to count
         print(density)
         print(count, density.sum())
