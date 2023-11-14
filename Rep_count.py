@@ -52,14 +52,15 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
     # print(timestamps)
     for iter, f in enumerate(fs):
         # print(f.pts)
+        # print(iter)
         # if f.pts in timestamps: # check if timestamp is within given list
         #     frames[f.pts] = f
         if iter in exemplar_timestamps:
             exemplar_frames.append(f)
         if iter in timestamps:
             frames[iter] = f
-        elif iter > timestamps[-1]:
-            break
+        # elif iter > timestamps[-1]:
+        #     break
         # elif f.pts > timestamps[-1]:
         #     break
 
@@ -190,9 +191,9 @@ class Rep_count(torch.utils.data.Dataset):
         """
         
         clip_duration = num_frames * sampling_interval  ### clip duration 
-        start = random.randint(0, vid_length-clip_duration)  ### sample a start frame randomly
+        start = random.randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
 
-        idx = np.linspace(0, clip_duration, num_frames)
+        idx = np.linspace(0, clip_duration, num_frames).astype(int)
         frame_idx = start + idx
 
         return frame_idx
@@ -284,7 +285,7 @@ class Rep_count(torch.utils.data.Dataset):
         video_name = f"{self.data_dir}/{self.split}/{self.df.iloc[index]['name']}"
         row = self.df.iloc[index]
         fps = row['fps']
-        duration = row['duration'] * fps
+        duration = int(row['duration'] * fps)
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])]
         starts = cycle[0::2]
         ends = cycle[1::2]
@@ -292,7 +293,9 @@ class Rep_count(torch.utils.data.Dataset):
         exemplar_index = random.randint(0, len(starts)-1)
         exemplar_start = starts[exemplar_index]  ## divide by fps tp convert to secs
         exemplar_end = ends[exemplar_index]
-        exemplar_frameidx = np.linspace(exemplar_start, exemplar_end, 3)
+        exemplar_frameidx = np.linspace(exemplar_start, exemplar_end, 3).astype(int)
+        # print(cycle)
+        # print(exemplar_frameidx)
         # print(video_name)
         # start = abs(float(self.df.iloc[index]['repetition_start']))#-float(s))
         # end = abs(float(self.df.iloc[index]['repetition_end']))#-float(s))
@@ -303,54 +306,51 @@ class Rep_count(torch.utils.data.Dataset):
         if self.jittering:
             jitter = max(math.floor((end - start) / (2*count)),0)
             start += jitter 
-        try:
-            frame_idx = self.get_vid_clips(duration)
-            # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
-            # print(frame_idx)
-            vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)
-            
-            # print(exemplar.shape)
-            # print(num_frames)
-            
-            label = normalize_label(cycle, duration) ## computing density map over entire video
-
-            count = label[frame_idx[0]: frame_idx[-1]].sum()  ### calculating the actual count in the trimmed clip
-            # print(original_count, label.sum())
-            density = label[frame_idx] ## sampling the density map at the selected frame indices
-            
-
-            density = density / density.sum() * count  ### normalizing density to sum up to count
-            print(density)
-            print(count, density.sum())
-            # print(density)
-            # print(count)
-
-            # vid, exemplar = read_video(video_name,0,duration, exemplar_start=exemplar_start, exemplar_end=exemplar_end)
-            # exemplar = read_video(video_name, exemplar_start, exemplar_end)
-            # print(vid)
+        # try:
+        # print(duration)
+        # assert duration > 64
+        frame_idx = self.get_vid_clips(duration-1)
+        # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
+        # print(frame_idx)
+        vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)
         
-            transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
-                                                                        convert_to_float=False,
-                                                                        min_size = 224,
-                                                                        crop_size = 224,
-                                                                        num_samples = None,
-                                                                        video_mean = [0.485,0.456,0.406], 
-                                                                        video_std = [0.229,0.224,0.225])
-            transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode=self.split,
-                                                                        convert_to_float=False,
-                                                                        min_size = 224,
-                                                                        crop_size = 224,
-                                                                        num_samples = 3,
-                                                                        video_mean = [0.485,0.456,0.406], 
-                                                                        video_std = [0.229,0.224,0.225])
-            vid = transform(vid/255.)  
-            if exemplar is not None:
-                exemplar = transform_exemplar(exemplar/255) 
-            # print(vid)
-            density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
-            
-        except Exception:
-            return (False)
+        
+        label = normalize_label(cycle, duration) ## computing density map over entire video
+
+        count = label[frame_idx[0]: frame_idx[-1]].sum()  ### calculating the actual count in the trimmed clip
+        # print(original_count, label.sum())
+        print(count)
+        density = label[frame_idx] ## sampling the density map at the selected frame indices
+        
+
+        density = density / density.sum() * count  ### normalizing density to sum up to count
+        
+        
+        
+
+        
+        transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
+                                                                    convert_to_float=False,
+                                                                    min_size = 224,
+                                                                    crop_size = 224,
+                                                                    num_samples = None,
+                                                                    video_mean = [0.485,0.456,0.406], 
+                                                                    video_std = [0.229,0.224,0.225])
+        transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode=self.split,
+                                                                    convert_to_float=False,
+                                                                    min_size = 224,
+                                                                    crop_size = 224,
+                                                                    num_samples = 3,
+                                                                    video_mean = [0.485,0.456,0.406], 
+                                                                    video_std = [0.229,0.224,0.225])
+        vid = transform(vid/255.)  
+        if exemplar is not None:
+            exemplar = transform_exemplar(exemplar/255) 
+        # print(vid)
+        density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
+        
+        # except Exception:
+        #     return (False)
         return vid, exemplar, density_label, count, video_name
             
 
@@ -365,7 +365,7 @@ if __name__=='__main__':
     print('dataset created')
     device = torch.device("cpu")
     print(f'Device: {device}')
-    dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=2,shuffle=False,pin_memory=False,drop_last=True)
+    dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=1,shuffle=False,pin_memory=False,drop_last=True)
     
     for i, item in enumerate(tqdm(dataloader)):
         print(i)
