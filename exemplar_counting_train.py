@@ -27,7 +27,12 @@ def get_args_parser():
 
     parser.add_argument('--norm_pix_loss', action='store_true',
                         help='Use (per-patch) normalized pixels as targets for computing loss')
+    
     parser.set_defaults(norm_pix_loss=False)
+
+    parser.add_argument('--use_mae', action='store_true', help='Use mean absolute error as a loss function')
+
+    parser.set_defaults(use_mae=True)
 
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
@@ -126,7 +131,9 @@ def main():
     # model.load_state_dict(state_dict, strict=False)
     # print(state_dict.keys())
     model.train()
-    loss1 = nn.MSELoss().cuda()
+    lossMSE = nn.MSELoss().cuda()
+    lossSL1 = nn.SmoothL1Loss().cuda()
+    
     for epoch in range(args.epochs):
         train_loss = 0
         sample_size = 0
@@ -136,9 +143,18 @@ def main():
             iter = (epoch * len(dataloader)) + i
             data = item[0].cuda()
             example = item[1].cuda()
+            actual_counts = item[3].cuda()
             optimizer.zero_grad()
             y = model(data, example)
-            loss = loss1(y, item[2].cuda())
+            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda()
+            loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
+            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
+                            predict_count.flatten().shape[0]    #### reduce the mean absolute error
+            loss = lossMSE(y, item[2].cuda()) 
+            if args.use_mae:
+                loss = loss + loss3
+            else:
+                loss = loss + loss2
             loss.backward()
             optimizer.step()
             train_loss += loss * data.shape[0]
