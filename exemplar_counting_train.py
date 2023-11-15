@@ -12,7 +12,7 @@ import wandb
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=12, type=int,
+    parser.add_argument('--batch_size', default=6, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -39,7 +39,7 @@ def get_args_parser():
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-4, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
@@ -137,7 +137,7 @@ def main():
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
-    state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+    state_dict = torch.load('VIT_B_16x4_MAE_PT.pyth')['model_state']
     
     for name, param in state_dict.items():
         if name in model.state_dict().keys():
@@ -165,6 +165,7 @@ def main():
                 total_loss1 = 0
                 total_loss2 = 0
                 total_loss3 = 0
+                off_by_one = 0
                 count = 0
                 
                 bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
@@ -215,6 +216,7 @@ def main():
                             total_loss1 += loss1.item() * data.shape[0]
                             total_loss2 += loss2 * data.shape[0]
                             total_loss3 += loss3.item() * data.shape[0]
+                            off_by_one += (torch.abs(actual_counts - predict_count) <=1).sum().item()
                             
                             if args.use_wandb:
                                 if phase == 'train':
@@ -235,7 +237,7 @@ def main():
                                     })
                             
                             pbar.set_description("EPOCH: {:02d} | PHASE: {} ".format(epoch,phase))
-                            pbar.set_postfix_str(" LOSS: {:.2f} | LOSS ITER: {:.2f}".format(epoch_loss, loss.item()))
+                            pbar.set_postfix_str(" LOSS: {:.2f} | MAE:{:.2f} | LOSS ITER: {:.2f} | OBO: {:.2f}".format(total_loss_all/count, total_loss3/count, loss.item(), off_by_one/count))
                             pbar.update()
                 
                 if phase == 'val':

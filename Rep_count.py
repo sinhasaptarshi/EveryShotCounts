@@ -180,7 +180,7 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_clips(self, vid_length, num_frames=16, sampling_interval=4, is_train=True):
+    def get_vid_clips(self, vid_length, num_frames=16, sampling_interval=4, mode='train'):
         """
         get_vid_clips.
 
@@ -193,7 +193,7 @@ class Rep_count(torch.utils.data.Dataset):
         """
         
         clip_duration = num_frames * sampling_interval  ### clip duration 
-        if is_train:
+        if mode=='train':
             start = random.randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
         else:
             start = max(vid_length - clip_duration, 0)//2
@@ -316,7 +316,7 @@ class Rep_count(torch.utils.data.Dataset):
         # print(duration)
         # if duration < 64:
         #     print(video_name)
-        frame_idx = self.get_vid_clips(duration-1)
+        frame_idx = self.get_vid_clips(duration-1, mode=self.split)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)

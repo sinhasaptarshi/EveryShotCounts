@@ -14,3 +14,4 @@
 /pretrained_models/
 *.jpg
 *.out
+*.pyth
