@@ -47,7 +47,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/FSC147/', type=str,
+    parser.add_argument('--data_path', default='/mnt/storage/scratch/ve22636/LLSP/', type=str,
                         help='dataset path')
     parser.add_argument('--anno_file', default='annotation_FSC147_384.json', type=str,
                      help='annotation json file')
