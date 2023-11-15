@@ -132,6 +132,7 @@ class Rep_count(torch.utils.data.Dataset):
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df['count'].notna()]
         self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
+        self.df = self.df[self.df['fps'] >= 10]
         print(len(self.df))
         if cfg is not None:
             self.num_frames = cfg.DATA.NUM_FRAMES
@@ -178,7 +179,7 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_clips(self, vid_length, num_frames=16, sampling_interval=4):
+    def get_vid_clips(self, vid_length, num_frames=16, sampling_interval=4, is_train=True):
         """
         get_vid_clips.
 
@@ -191,7 +192,11 @@ class Rep_count(torch.utils.data.Dataset):
         """
         
         clip_duration = num_frames * sampling_interval  ### clip duration 
-        start = random.randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
+        if is_train:
+            start = random.randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
+        else:
+            start = max(vid_length - clip_duration, 0)//2
+        
 
         idx = np.linspace(0, clip_duration, num_frames).astype(int)
         frame_idx = start + idx
@@ -308,7 +313,8 @@ class Rep_count(torch.utils.data.Dataset):
             start += jitter 
         # try:
         # print(duration)
-        # assert duration > 64
+        # if duration < 64:
+        #     print(video_name)
         frame_idx = self.get_vid_clips(duration-1)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
@@ -319,11 +325,11 @@ class Rep_count(torch.utils.data.Dataset):
 
         count = label[frame_idx[0]: frame_idx[-1]].sum()  ### calculating the actual count in the trimmed clip
         # print(original_count, label.sum())
-        print(count)
+        # print(count)
         density = label[frame_idx] ## sampling the density map at the selected frame indices
         
 
-        density = density / density.sum() * count  ### normalizing density to sum up to count
+        density = density / (density.sum() + 1e-10) * count  ### normalizing density to sum up to count
         
         
         
