@@ -128,12 +128,13 @@ class Rep_count(torch.utils.data.Dataset):
         self.split = split # set the split to load
         self.jittering = jittering # temporal jittering (augmentation)
         self.add_noise = add_noise # add noise to frames (augmentation)
-        csv_path = os.path.join(data_dir,f"{self.split}_with_fps.csv")
+        csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df['count'].notna()]
         self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         self.df = self.df[self.df['fps'] >= 10]
-        print(len(self.df))
+        self.df = self.df[self.df['count'] > 0] # remove no reps
+        print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
         if cfg is not None:
             self.num_frames = cfg.DATA.NUM_FRAMES
         else:
@@ -319,7 +320,6 @@ class Rep_count(torch.utils.data.Dataset):
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)
-        
         
         label = normalize_label(cycle, duration) ## computing density map over entire video
 
