@@ -115,19 +115,20 @@ def main():
                 )
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
     dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
-    dataset_val = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
+    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path)
+    dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
     
     # Create dict of dataloaders for train and val
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
                                                        num_workers=args.num_workers,
                                                        shuffle=True,
-                                                       pin_memory=False,
+                                                       pin_memory=True,
                                                        drop_last=True),
-                   'valid':torch.utils.data.DataLoader(dataset_val,
+                   'val':torch.utils.data.DataLoader(dataset_val,
                                                      batch_size=args.batch_size,
                                                      num_workers=args.num_workers,
                                                      shuffle=False,
-                                                     pin_memory=False,
+                                                     pin_memory=True,
                                                      drop_last=True)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
@@ -136,14 +137,14 @@ def main():
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
-    #state_dict = torch.load('pretrained_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+    state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
     
-    #for name, param in state_dict.items():
-    #    if name in model.state_dict().keys():
-    #        if 'decoder' not in name:
-    #            print(name)
-    #            # new_name = name.replace('quantizer.', '')
-    #            model.state_dict()[name].copy_(param)
+    for name, param in state_dict.items():
+        if name in model.state_dict().keys():
+            if 'decoder' not in name:
+                print(name)
+                # new_name = name.replace('quantizer.', '')
+                model.state_dict()[name].copy_(param)
     
     optimizer = torch.optim.AdamW(param_groups, lr=1e-6, betas=(0.9, 0.95))
     lossMSE = nn.MSELoss().cuda()
