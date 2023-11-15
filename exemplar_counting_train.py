@@ -89,6 +89,7 @@ def get_args_parser():
     parser.add_argument('--log_dir', default='./logs/fim6_dir',
                         help='path where to tensorboard log')
     parser.add_argument("--title", default="CounTR_finetuning", type=str)
+    parser.add_argument("--use_wandb", default=True, type=lambda x: (str(x).lower() == 'true'))
     parser.add_argument("--wandb", default="counting", type=str)
     parser.add_argument("--team", default="repetition_counting", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
@@ -104,65 +105,166 @@ def main():
     parser = get_args_parser()
     args = parser.parse_args()
     args.opts = None
-    wandb_run = wandb.init(
-                config=args,
-                resume="allow",
-                project=args.wandb,
-                name=args.title,
-                entity=args.team,
-                tags=["CounTR", "finetuning"],
-                id=args.wandb_id,
-            )
+    if args.use_wandb:
+        wandb_run = wandb.init(
+                    config=args,
+                    resume="allow",
+                    project=args.wandb,
+                    entity=args.team,
+                    id=args.wandb_id,
+                )
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
-    dataset = Rep_count(cfg=cfg)
-    dataloader = torch.utils.data.DataLoader(dataset,batch_size=args.batch_size,num_workers=4,shuffle=True,pin_memory=False,drop_last=True)
+    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
+    dataset_val = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
+    
+    # Create dict of dataloaders for train and val
+    dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
+                                                       num_workers=args.num_workers,
+                                                       shuffle=True,
+                                                       pin_memory=False,
+                                                       drop_last=True),
+                   'valid':torch.utils.data.DataLoader(dataset_val,
+                                                     batch_size=args.batch_size,
+                                                     num_workers=args.num_workers,
+                                                     shuffle=False,
+                                                     pin_memory=False,
+                                                     drop_last=True)}
+              
+    scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     
     model = SupervisedMAE(cfg=cfg).cuda()
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
+    
+    #state_dict = torch.load('pretrained_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+    
+    #for name, param in state_dict.items():
+    #    if name in model.state_dict().keys():
+    #        if 'decoder' not in name:
+    #            print(name)
+    #            # new_name = name.replace('quantizer.', '')
+    #            model.state_dict()[name].copy_(param)
+    
     optimizer = torch.optim.AdamW(param_groups, lr=1e-6, betas=(0.9, 0.95))
-    state_dict = torch.load('pretrained_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
-    for name, param in state_dict.items():
-        if name in model.state_dict().keys():
-            if 'decoder' not in name:
-                print(name)
-                # new_name = name.replace('quantizer.', '')
-                model.state_dict()[name].copy_(param)
-    # model.load_state_dict(state_dict, strict=False)
-    # print(state_dict.keys())
-    model.train()
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
     
+    train_step = 0
+    val_step = 0
+    
     for epoch in range(args.epochs):
-        train_loss = 0
-        sample_size = 0
-        for i, item in enumerate(tqdm(dataloader)):
-            # print(item[0].shape)
-            # print(item[1].shape)
-            iter = (epoch * len(dataloader)) + i
-            data = item[0].cuda()
-            example = item[1].cuda()
-            actual_counts = item[3].cuda()
-            optimizer.zero_grad()
-            y = model(data, example)
-            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda()
-            loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
-            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
+        print(f"Epoch: {epoch:02d}")
+        for phase in ['train', 'val']:
+            if phase == 'val':
+                ground_truth = list()
+                predictions = list()
+            
+            with torch.set_grad_enabled(phase == 'train'):
+                total_loss_all = 0
+                total_loss1 = 0
+                total_loss2 = 0
+                total_loss3 = 0
+                count = 0
+                
+                bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
+                dataloader = dataloaders[phase]
+                with tqdm(total=len(dataloader),bar_format=bformat,ascii='░▒█') as pbar:
+                    for i, item in enumerate(dataloader):
+                        if phase == 'train':
+                            train_step+=1
+                        elif phase == 'val':
+                            val_step+=1
+                        with torch.cuda.amp.autocast(enabled=True):
+                            
+                            # print(item[0].shape)
+                            # print(item[1].shape)
+                            #iter = (epoch * len(dataloader)) + i
+                            
+                            data = item[0].cuda() # B x C x T x H x W
+                            example = item[1].cuda() # B x C x T' x H' x W'
+                            actual_counts = item[3].cuda() # B x 1
+            
+                            optimizer.zero_grad()
+                            y = model(data, example)
+                            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
+                            if phase == 'val':
+                                ground_truth.append(actual_counts.detach().cpu().numpy())
+                                predictions.append(predict_count.detach().cpu().numpy())
+                            
+                            loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
+                            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
-            loss = lossMSE(y, item[2].cuda()) 
-            if args.use_mae:
-                loss = loss + loss3
-            else:
-                loss = loss + loss2
-            loss.backward()
-            optimizer.step()
-            train_loss += loss * data.shape[0]
-            sample_size += data.shape[0]
-            if iter % 10 == 0:
-                print('Epoch {}  Batch {}/{} Train loss {}'.format(epoch, i, len(dataloader), train_loss/ sample_size))
-        wandb_run.log({'epoch': epoch, 'train_loss': train_loss/sample_size})
-    wandb_run.finish()
+                            
+                            loss1 = lossMSE(y, item[2].cuda()) 
+                            
+                            if args.use_mae:
+                                loss = loss1 + loss3
+                                loss2 = 0 # Set to 0 for clearer logging
+                            else:
+                                loss = loss1 + loss2
+                                loss3 = 0 # Set to 0 for clearer logging
+                            if phase=='train':
+                                scaler.scale(loss).backward()
+                                scaler.step(optimizer)
+                                scaler.update()
+                            
+                            epoch_loss = loss.item()
+                            count += data.shape[0]
+                            total_loss_all += loss.item() * data.shape[0]
+                            total_loss1 += loss1.item() * data.shape[0]
+                            total_loss2 += loss2 * data.shape[0]
+                            total_loss3 += loss3.item() * data.shape[0]
+                            
+                            if args.use_wandb:
+                                if phase == 'train':
+                                    wandb_run.log({
+                                        "train_step": train_step,
+                                        "train_loss_per_step": loss,
+                                        "train_loss1_per_step": loss1,
+                                        "train_loss2_per_step": loss2,
+                                        "train_loss3_per_step": loss3
+                                    })
+                                if phase == 'val':
+                                    wandb.log({
+                                        "val_step": val_step,
+                                        "val_loss_per_step": loss,
+                                        "val_loss1_per_step": loss1,
+                                        "val_loss2_per_step": loss2,
+                                        "val_loss3_per_step": loss3
+                                    })
+                            
+                            pbar.set_description("EPOCH: {:02d} | PHASE: {} ".format(epoch,phase))
+                            pbar.set_postfix_str(" LOSS: {:.2f} | LOSS ITER: {:.2f}".format(epoch_loss, loss.item()))
+                            pbar.update()
+                
+                if phase == 'val':
+                    ground_truth = np.asarray(ground_truth).flatten()
+                    predictions = np.asarray(predictions).flatten()
+                    
+                    obo = sum([1 if abs(pred-gt) <=1 else 0 for pred, gt in zip(predictions, ground_truth)]) / float(ground_truth.shape[0])
+                    mae_err = np.mean(np.abs(ground_truth - predictions) / ground_truth.shape[0]) 
+                
+                if args.use_wandb:
+                    if phase == 'train':
+                        wandb.log({"epoch": epoch, 
+                            "train_loss": total_loss_all/float(count), 
+                            "train_loss1": total_loss1/float(count), 
+                            "train_loss2": total_loss2/float(count), 
+                            "train_loss3": total_loss3/float(count), 
+                        })
+                    
+                    if phase == 'val':
+                        wandb.log({"epoch": epoch, 
+                            "val_loss": total_loss_all/float(count), 
+                            "val_loss1": total_loss1/float(count), 
+                            "val_loss2": total_loss2/float(count), 
+                            "val_loss3": total_loss3/float(count), 
+                            "obo": obo, 
+                            "mae": mae_err, 
+                        })
+    
+    if args.use_wandb:                                   
+        wandb_run.finish()
 
 if __name__=='__main__':
     main()

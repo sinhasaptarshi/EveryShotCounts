@@ -128,7 +128,7 @@ class Rep_count(torch.utils.data.Dataset):
         self.split = split # set the split to load
         self.jittering = jittering # temporal jittering (augmentation)
         self.add_noise = add_noise # add noise to frames (augmentation)
-        csv_path = f"/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/{self.split}_with_fps.csv"
+        csv_path = os.path.join(data_dir,f"{self.split}_with_fps.csv")
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df['count'].notna()]
         self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
