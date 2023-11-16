@@ -14,7 +14,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=24, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=200, type=int)
+    parser.add_argument('--epochs', default=40, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
@@ -43,7 +43,7 @@ def get_args_parser():
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
-    parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
+    parser.add_argument('--warmup_epochs', type=int, default=2, metavar='N',
                         help='epochs to warmup LR')
 
     # Dataset parameters
@@ -66,12 +66,12 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
                         help='resume from checkpoint')
-    parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
+    parser.add_argument('--pretrained_encoder', default=None, type=str)
 
     # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=16, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -115,6 +115,9 @@ def main():
                     id=args.wandb_id,
                 )
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
+    
+    
+    
     dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
     dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path)
     dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
@@ -138,7 +141,10 @@ def main():
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
-    state_dict = torch.load(args.pretrained_encoder)['model_state']
+    if args.pretrained_encoder:
+        state_dict = torch.load(args.pretrained_encoder)['model_state']
+    else:
+        state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
     
     for name, param in state_dict.items():
         if name in model.state_dict().keys():
@@ -179,12 +185,8 @@ def main():
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
                             
-                            # print(item[0].shape)
-                            # print(item[1].shape)
-                            #iter = (epoch * len(dataloader)) + i
-                            
                             data = item[0].cuda() # B x C x T x H x W
-                            example = item[1].cuda() # B x C x T' x H' x W'
+                            example = item[1].cuda() # B x C x T' x H x W
                             actual_counts = item[3].cuda() # B x 1
             
                             optimizer.zero_grad()
@@ -237,16 +239,10 @@ def main():
                                         "val_loss3_per_step": loss3
                                     })
                             
-                            pbar.set_description("EPOCH: {:02d} | PHASE: {} ".format(epoch,phase))
-                            pbar.set_postfix_str(" LOSS: {:.2f} | MAE:{:.2f} | LOSS ITER: {:.2f} | OBO: {:.2f}".format(total_loss_all/count, total_loss3/count, loss.item(), off_by_one/count))
+                            pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
+                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBO: {off_by_one/count:.2f}")
                             pbar.update()
-                
-                if phase == 'val':
-                    ground_truth = np.asarray(ground_truth).flatten()
-                    predictions = np.asarray(predictions).flatten()
-                    
-                    obo = sum([1 if abs(pred-gt) <=1 else 0 for pred, gt in zip(predictions, ground_truth)]) / float(ground_truth.shape[0])
-                    mae_err = np.mean(np.abs(ground_truth - predictions) / ground_truth.shape[0]) 
+                             
                 
                 if args.use_wandb:
                     if phase == 'train':
@@ -263,8 +259,8 @@ def main():
                             "val_loss1": total_loss1/float(count), 
                             "val_loss2": total_loss2/float(count), 
                             "val_loss3": total_loss3/float(count), 
-                            "obo": obo, 
-                            "mae": mae_err, 
+                            "obo": off_by_one/count, 
+                            "mae": total_loss3/count, 
                         })
     
     if args.use_wandb:                                   
