@@ -12,7 +12,7 @@ import wandb
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=24, type=int,
+    parser.add_argument('--batch_size', default=12, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -39,7 +39,7 @@ def get_args_parser():
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-5, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
@@ -195,7 +195,7 @@ def main():
                                 predictions.append(predict_count.detach().cpu().numpy())
                             
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
-                            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
+                            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-12)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
                             
                             loss1 = lossMSE(y, item[2].cuda()) 

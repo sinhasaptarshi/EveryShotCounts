@@ -26,7 +26,7 @@ from pytorchvideo.transforms import (
 )
 from pytorchvideo.data.encoded_video import EncodedVideo
 
-def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
+def read_video_timestamps(video_filename, timestamps, exemplar_timestamps, duration=0):
     """ 
     summary
 
@@ -65,6 +65,8 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
         # elif f.pts > timestamps[-1]:
         #     break
     # print('frames', iter)
+    if iter != duration:
+        print(video_filename)
     result = [frames[pts] for pts in sorted(frames)] # rearrange
     if len(result) == 0:
         print(timestamps)
@@ -135,9 +137,11 @@ class Rep_count(torch.utils.data.Dataset):
         csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df['count'].notna()]
-        self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
-        self.df = self.df[self.df['fps'] >= 10]
-        self.df = self.df[self.df['count'] > 0] # remove no reps
+        # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
+        # self.df = self.df[self.df['fps'] >= 10]
+        self.df = self.df[self.df['num_frames'] > 64]
+        self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
+        # self.df = self.df[self.df['count'] > 0] # remove no reps
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
         if cfg is not None:
             self.num_frames = cfg.DATA.NUM_FRAMES
@@ -327,7 +331,7 @@ class Rep_count(torch.utils.data.Dataset):
         frame_idx = self.get_vid_clips(duration-1, mode=self.split)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
-        vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)
+        vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx, duration=duration-1)
         
         label = normalize_label(cycle, duration) ## computing density map over entire video
 
