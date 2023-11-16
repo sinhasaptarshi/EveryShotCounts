@@ -50,6 +50,7 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
 
     
     # print(timestamps)
+    
     for iter, f in enumerate(fs):
         # print(f.pts)
         # print(iter)
@@ -63,8 +64,11 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
         #     break
         # elif f.pts > timestamps[-1]:
         #     break
-
+    # print('frames', iter)
     result = [frames[pts] for pts in sorted(frames)] # rearrange
+    if len(result) == 0:
+        print(timestamps)
+        print(iter)
     # print(torch.from_numpy(result[1].to_ndarray(format='rgb24')).shape)
     
 
@@ -192,16 +196,16 @@ class Rep_count(torch.utils.data.Dataset):
             sampling_interval (int, optional): sample one frame every N frames. Default is 4
         """
         
-        clip_duration = num_frames * sampling_interval  ### clip duration 
+        clip_duration = int(num_frames * sampling_interval)  ### clip duration 
         if mode=='train':
             start = random.randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
         else:
             start = max(vid_length - clip_duration, 0)//2
         
 
-        idx = np.linspace(0, clip_duration, num_frames).astype(int)
+        idx = np.linspace(0, clip_duration, num_frames+1).astype(int)[:num_frames]
         frame_idx = start + idx
-
+        # print(frame_idx)
         return frame_idx
 
 
@@ -289,9 +293,12 @@ class Rep_count(torch.utils.data.Dataset):
     def __getitem__(self, index):
         
         video_name = f"{self.data_dir}/{self.split}/{self.df.iloc[index]['name']}"
+        cap = cv2.VideoCapture(video_name)
+        
         row = self.df.iloc[index]
-        fps = row['fps']
-        duration = int(row['duration'] * fps)
+        duration = row['num_frames']
+        # fps = row['fps']
+        # duration = int(row['duration'] * fps)
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])]
         starts = cycle[0::2]
         ends = cycle[1::2]
@@ -316,6 +323,7 @@ class Rep_count(torch.utils.data.Dataset):
         # print(duration)
         # if duration < 64:
         #     print(video_name)
+        # print('duration', duration -1)
         frame_idx = self.get_vid_clips(duration-1, mode=self.split)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
@@ -329,7 +337,7 @@ class Rep_count(torch.utils.data.Dataset):
         density = label[frame_idx] ## sampling the density map at the selected frame indices
         
 
-        density = density / (density.sum() + 1e-10) * count  ### normalizing density to sum up to count
+        density = torch.Tensor(density / (density.sum() + 1e-10) * count)  ### normalizing density to sum up to count
         
         
         
@@ -353,11 +361,11 @@ class Rep_count(torch.utils.data.Dataset):
         if exemplar is not None:
             exemplar = transform_exemplar(exemplar/255) 
         # print(vid)
-        density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
+        # density_label = torch.Tensor(self.preprocess(duration*fps, cycle, self.num_frames))
         
         # except Exception:
         #     return (False)
-        return vid, exemplar, density_label, count, video_name
+        return vid, exemplar, density, count, video_name
             
 
     def __len__(self):
@@ -375,7 +383,7 @@ if __name__=='__main__':
     
     for i, item in enumerate(tqdm(dataloader)):
         print(i)
-        # print(i,item[0].shape)
+        print(i,item[0].shape)
         # print(i, item[1].shape)
         # print(i, item[2].shape)
         # print(item[2])

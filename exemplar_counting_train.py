@@ -12,9 +12,9 @@ import wandb
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=6, type=int,
+    parser.add_argument('--batch_size', default=24, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=20, type=int)
+    parser.add_argument('--epochs', default=200, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
@@ -39,7 +39,7 @@ def get_args_parser():
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1e-5, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
@@ -47,7 +47,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/mnt/storage/scratch/ve22636/LLSP/', type=str,
+    parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/', type=str,
                         help='dataset path')
     parser.add_argument('--anno_file', default='annotation_FSC147_384.json', type=str,
                      help='annotation json file')
@@ -66,6 +66,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
                         help='resume from checkpoint')
+    parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
 
     # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -137,7 +138,7 @@ def main():
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
-    state_dict = torch.load('VIT_B_16x4_MAE_PT.pyth')['model_state']
+    state_dict = torch.load(args.pretrained_encoder)['model_state']
     
     for name, param in state_dict.items():
         if name in model.state_dict().keys():
@@ -146,7 +147,7 @@ def main():
                 # new_name = name.replace('quantizer.', '')
                 model.state_dict()[name].copy_(param)
     
-    optimizer = torch.optim.AdamW(param_groups, lr=1e-6, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW(param_groups, lr=args.blr, betas=(0.9, 0.95))
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
     
