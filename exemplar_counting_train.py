@@ -9,6 +9,7 @@ from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
 import argparse
 import wandb
+import torch.optim as optim
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -21,6 +22,7 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
+    parser.add_argument('--save_path', default='./saved_models', type=str, help="Path to save the model")
 
     parser.add_argument('--mask_ratio', default=0.5, type=float,
                         help='Masking ratio (percentage of removed patches).')
@@ -39,12 +41,13 @@ def get_args_parser():
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1e-4, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=2, metavar='N',
                         help='epochs to warmup LR')
+    parser.add_argument('--eval_freq', default=5, type=int)
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/', type=str,
@@ -66,7 +69,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
                         help='resume from checkpoint')
-    parser.add_argument('--pretrained_encoder', default=None, type=str)
+    parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
 
     # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -154,6 +157,7 @@ def main():
                 model.state_dict()[name].copy_(param)
     
     optimizer = torch.optim.AdamW(param_groups, lr=args.blr, betas=(0.9, 0.95))
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
     
@@ -161,11 +165,17 @@ def main():
     val_step = 0
     
     for epoch in range(args.epochs):
+        scheduler.step(epoch)
         print(f"Epoch: {epoch:02d}")
         for phase in ['train', 'val']:
             if phase == 'val':
+                if epoch % args.eval_freq != 0:
+                    continue
+                model.eval()
                 ground_truth = list()
                 predictions = list()
+            else:
+                model.train()
             
             with torch.set_grad_enabled(phase == 'train'):
                 total_loss_all = 0
@@ -197,7 +207,7 @@ def main():
                                 predictions.append(predict_count.detach().cpu().numpy())
                             
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
-                            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-12)) / \
+                            loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
                             
                             loss1 = lossMSE(y, item[2].cuda()) 
@@ -262,6 +272,11 @@ def main():
                             "obo": off_by_one/count, 
                             "mae": total_loss3/count, 
                         })
+                        torch.save({
+                            'epoch': epoch,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            }, os.path.join(args.save_path, 'checkpoint_epoch_{}.pyth'.format(str(epoch).zfill(5))))
     
     if args.use_wandb:                                   
         wandb_run.finish()

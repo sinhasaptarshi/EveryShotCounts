@@ -8,11 +8,13 @@ import collections
 import skimage.draw
 import math
 import csv
+import av
 import pandas as pd
 from tqdm import tqdm
 import random
 from label_norm import normalize_label
 from pytorchvideo.data.utils import thwc_to_cthw
+from itertools import islice
 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import CenterCropVideo, NormalizeVideo
@@ -26,15 +28,7 @@ from pytorchvideo.transforms import (
 )
 from pytorchvideo.data.encoded_video import EncodedVideo
 
-<<<<<<< HEAD
 def read_video_timestamps(video_filename, timestamps, exemplar_timestamps, duration=0):
-=======
-import av, time
-
-from itertools import islice
-
-def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
->>>>>>> ad17bd71e65a0301c5e0a4eab2b5c718176530e2
     """ 
     summary
 
@@ -64,30 +58,10 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps):
         c = i + min_t
         if c in exemplar_timestamps:
             exemplar_frames.append(f)
-<<<<<<< HEAD
-        if iter in timestamps:
-            frames[iter] = f
-        # elif iter > timestamps[-1]:
-        #     break
-        # elif f.pts > timestamps[-1]:
-        #     break
-    # print('frames', iter)
-    if iter != duration:
-        print(video_filename)
-    result = [frames[pts] for pts in sorted(frames)] # rearrange
-    if len(result) == 0:
-        print(timestamps)
-        print(iter)
-    # print(torch.from_numpy(result[1].to_ndarray(format='rgb24')).shape)
-    
-
-    video_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in result] # list of length T with items size [H x W x 3] 
-=======
         if c in timestamps:
             frames.append(f)
         
     video_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in frames] # list of length T with items size [H x W x 3] 
->>>>>>> ad17bd71e65a0301c5e0a4eab2b5c718176530e2
     video_frames = thwc_to_cthw(torch.stack(video_frames).to(torch.float32))
     
     exemplar_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in exemplar_frames]  ### example reps
@@ -145,18 +119,11 @@ class Rep_count(torch.utils.data.Dataset):
         csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df['count'].notna()]
-<<<<<<< HEAD
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # self.df = self.df[self.df['fps'] >= 10]
         self.df = self.df[self.df['num_frames'] > 64]
         self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
-        # self.df = self.df[self.df['count'] > 0] # remove no reps
-=======
-        #self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
-        self.df = self.df[self.df['fps'] >= 10]
         self.df = self.df[self.df['count'] > 0] # remove no reps
-        self.df = self.df[self.df['name']!='stu1_10.mp4']
->>>>>>> ad17bd71e65a0301c5e0a4eab2b5c718176530e2
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
         if cfg is not None:
             self.num_frames = cfg.DATA.NUM_FRAMES
@@ -306,6 +273,7 @@ class Rep_count(torch.utils.data.Dataset):
     def __getitem__(self, index):
          
         video_name = f"{self.data_dir}/{self.split}/{self.df.iloc[index]['name']}"
+        print(os.path.isfile(video_name))
         cap = cv2.VideoCapture(video_name)
         
         row = self.df.iloc[index]
@@ -319,13 +287,9 @@ class Rep_count(torch.utils.data.Dataset):
         exemplar_frameidx = np.linspace(exemplar_start, exemplar_end, 3).astype(int)
         
         frame_idx = self.get_vid_clips(duration-1, mode=self.split)
-<<<<<<< HEAD
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx, duration=duration-1)
-=======
-        vid, exemplar, _ = read_video_timestamps(video_name, frame_idx, exemplar_frameidx)
->>>>>>> ad17bd71e65a0301c5e0a4eab2b5c718176530e2
         
         label = normalize_label(cycle, duration) ## computing density map over entire video
 
