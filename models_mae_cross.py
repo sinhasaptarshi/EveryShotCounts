@@ -186,14 +186,10 @@ class SupervisedMAE(nn.Module):
         h = w = int(math.sqrt(hw))
         x = x.transpose(1, 2).reshape(n, c, h, w)
 
-        x = F.interpolate(
-                        self.decode_head0(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = F.interpolate(
-                        self.decode_head1(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = F.interpolate(
-                        self.decode_head2(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
-        x = F.interpolate(
-                        self.decode_head3(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+        x = F.interpolate(self.decode_head0(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+        x = F.interpolate(self.decode_head1(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+        x = F.interpolate(self.decode_head2(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
+        x = F.interpolate(self.decode_head3(x), size=x.shape[-1]*2, mode='bilinear', align_corners=False)
         x = x.squeeze(-3)
 
         return x
