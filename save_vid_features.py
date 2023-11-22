@@ -29,25 +29,30 @@ def save_exemplar(dataloaders, model):
             video = item[0].squeeze(0)
             starts = item[-3]
             ends = item[-2]
-            print(ends)
             video_name = item[-1][0]
-            # print(video_name)
+            print(video_name)
             C, T, H, W = video.shape
 
             clip_list = []
             num_examples = len(starts)
-            for j in range(num_examples):
-                idx = np.linspace(starts[j].item(), ends[j].item(), 16)
+            if split == 'train':
+                for j in range(num_examples):
+                    idx = np.linspace(starts[j].item(), ends[j].item(), 17)[:16]
+                    clips = video[:, idx]
+                    clip_list.append(clips)
+            else:
+                idx = np.linspace(starts[0].item(), ends[0].item(), 16)
                 clips = video[:, idx]
                 clip_list.append(clips)
             
             data = torch.stack(clip_list).cuda()
             print(data.shape)
             with torch.no_grad():
-                encoded = model(data)
-            print(encoded.shape)
+                with torch.cuda.amp.autocast(enabled=True):
+                    encoded = model(data)
+            # print(encoded.shape)
             
-            # np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
+            np.savez('examplar_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
 
 def save_tokens(dataloaders, model):
     for split in ['train', 'val']:

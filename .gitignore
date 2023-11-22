@@ -17,6 +17,8 @@
 *.pyth
 <<<<<<< HEAD
 /saved_tokens/
+/examplar_tokens/
+
 =======
 saved_tokens/
 saved_models/
