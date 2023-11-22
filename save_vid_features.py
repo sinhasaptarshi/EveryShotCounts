@@ -24,7 +24,7 @@ def get_args_parser():
     return parser
 
 def save_exemplar(dataloaders, model):
-    for split in ['train', 'val', 'test']:
+    for split in ['train','val', 'test']:
         for i, item in enumerate(dataloaders[split]):
             video = item[0].squeeze(0)
             starts = item[-3]
@@ -35,15 +35,15 @@ def save_exemplar(dataloaders, model):
 
             clip_list = []
             num_examples = len(starts)
-            if split == 'train':
-                for j in range(num_examples):
-                    idx = np.linspace(starts[j].item(), ends[j].item(), 17)[:16]
-                    clips = video[:, idx]
-                    clip_list.append(clips)
-            else:
-                idx = np.linspace(starts[0].item(), ends[0].item(), 16)
+            # if split == 'train':
+            for j in range(num_examples):
+                idx = np.linspace(starts[j].item(), ends[j].item(), 17)[:16].astype(int)
                 clips = video[:, idx]
                 clip_list.append(clips)
+            # else:
+            #     idx = np.linspace(starts[0].item(), ends[0].item(), 16)
+            #     clips = video[:, idx]
+            #     clip_list.append(clips)
             
             data = torch.stack(clip_list).cuda()
             print(data.shape)
