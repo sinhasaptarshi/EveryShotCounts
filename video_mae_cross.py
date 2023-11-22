@@ -38,12 +38,12 @@ class SupervisedMAE(nn.Module):
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False):
+
         super().__init__()
 
         # --------------------------------------------------------------------------
         # MAE encoder specifics
 
-        num_classes = cfg.MODEL.NUM_CLASSES
         embed_dim = cfg.MVIT.EMBED_DIM
         self.just_encode = just_encode
         # Prepare backbone
@@ -310,7 +310,7 @@ class SupervisedMAE(nn.Module):
         #     nn.ReLU(inplace=True),
         #     nn.Conv2d(256, 1, kernel_size=1, stride=1)
         # )  
-    
+
         # --------------------------------------------------------------------------
 
         self.decode_head0 = nn.Sequential(

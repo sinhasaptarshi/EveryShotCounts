@@ -159,8 +159,8 @@ class RepMem(nn.Module):
 if __name__ == '__main__':
     model = RepMem().cuda()
     
-    x = torch.rand(3,3,64,224,224).cuda()
-    ex = torch.rand(3,3,4,224,224).cuda()
+    x = torch.rand(1,3,64,224,224).cuda()
+    ex = torch.rand(1,3,4,224,224).cuda()
     
     with torch.autocast(device_type="cuda"):
         x = model(x,ex)

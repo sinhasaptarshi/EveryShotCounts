@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -7,6 +8,8 @@ from Rep_count import Rep_count
 from video_mae_cross import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
+
+import tqdm
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -21,7 +24,7 @@ def get_args_parser():
     return parser
 
 def save_exemplar(dataloaders, model):
-    for split in ['train', 'val']:
+    for split in ['train', 'val', 'test']:
         for i, item in enumerate(dataloaders[split]):
             video = item[0].squeeze(0)
             starts = item[-3]
@@ -61,7 +64,8 @@ def save_tokens(dataloaders, model):
                 clip_list.append(clips)
             data = torch.stack(clip_list).cuda()
             with torch.no_grad():
-                encoded = model(data)
+                with torch.cuda.amp.autocast(enabled=True):
+                    encoded = model(data)
             # print(encoded.shape)
             
             # np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
@@ -81,21 +85,27 @@ def main():
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     model.eval()
 
-    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
-    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path)
+    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path,sampling_interval=1,encode_only=True)
+    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path,sampling_interval=1,encode_only=True)
     dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
-                                                       num_workers=4,
-                                                       shuffle=True,
+                                                       num_workers=10,
+                                                       shuffle=False,
                                                        pin_memory=True,
-                                                       drop_last=True),
+                                                       drop_last=False),
                    'val':torch.utils.data.DataLoader(dataset_val,
                                                      batch_size=args.batch_size,
-                                                     num_workers=4,
+                                                     num_workers=10,
                                                      shuffle=False,
                                                      pin_memory=True,
-                                                     drop_last=True)}
+                                                     drop_last=False),
+                   'test':torch.utils.data.DataLoader(dataset_test,
+                                                     batch_size=args.batch_size,
+                                                     num_workers=10,
+                                                     shuffle=False,
+                                                     pin_memory=True,
+                                                     drop_last=False)}
     if args.pretrained_encoder:
         state_dict = torch.load(args.pretrained_encoder)['model_state']
     else:

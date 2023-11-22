@@ -15,4 +15,11 @@
 *.jpg
 *.out
 *.pyth
+<<<<<<< HEAD
 /saved_tokens/
+=======
+saved_tokens/
+saved_models/
+data/
+checkpoints/
+>>>>>>> 0a971ef2a2950e4e43b81f98c699329048e62463
