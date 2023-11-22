@@ -14,8 +14,7 @@ from tqdm import tqdm
 import random
 from label_norm import normalize_label
 from pytorchvideo.data.utils import thwc_to_cthw
-from itertools import islice
-import matplotlib.pyplot as plt
+from itertools import cycle, islice
 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import CenterCropVideo, NormalizeVideo
@@ -28,6 +27,11 @@ from pytorchvideo.transforms import (
     Div255
 )
 from pytorchvideo.data.encoded_video import EncodedVideo
+
+
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 
 def read_video_timestamps(video_filename, timestamps, exemplar_timestamps, duration=0):
     """ 
@@ -58,16 +62,18 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps, durat
     for i, f in enumerate(islice(container.decode(video=0), min_t, max_t+1)):
         c = i + min_t
         if c in exemplar_timestamps:
-            exemplar_frames.append(f)
+            for _ in range(exemplar_timestamps.tolist().count(c)): # for multiple occurrences
+                exemplar_frames.append(f)
         if c in timestamps:
-            frames.append(f)
+            for _ in range(timestamps.tolist().count(c)): # for multiple occurrences
+                frames.append(f)
         
     video_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in frames] # list of length T with items size [H x W x 3] 
     video_frames = thwc_to_cthw(torch.stack(video_frames).to(torch.float32))
     
     exemplar_frames = [torch.from_numpy(f.to_ndarray(format='rgb24')) for f in exemplar_frames]  ### example reps
     exemplar_frames = thwc_to_cthw(torch.stack(exemplar_frames).to(torch.float32))
-    
+    container.close()
     return video_frames, exemplar_frames, timestamps[-1]
 
 '''
@@ -130,7 +136,7 @@ class Rep_count(torch.utils.data.Dataset):
             self.num_frames = cfg.DATA.NUM_FRAMES
         else:
             self.num_frames = 16 
-            
+        
         self.transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
                                                                     convert_to_float=False,
                                                                     min_size = 224,
@@ -164,11 +170,12 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_clips(self, vid_length, num_frames=16, sampling_interval=4, mode='train'):
+    def get_vid_clips(self,vid_length, sampling_interval=4, sampling='random'):
+        
         """
         get_vid_clips.
 
-        Samples 16 frames clips from the given video. 
+        Samples `num_frames` frames clips from the given video. 
 
         Args:
             vid_length (int, Optional): number of frames in the entire video. If None, it will take the end of the last repetition as the end of video
@@ -176,16 +183,22 @@ class Rep_count(torch.utils.data.Dataset):
             sampling_interval (int, optional): sample one frame every N frames. Default is 4
         """
         
-        clip_duration = int(num_frames * sampling_interval)  ### clip duration 
-        if mode=='train':
-            start = random.randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
-            idx = np.linspace(0, clip_duration, num_frames+1).astype(int)[:num_frames]
-            frame_idx = start + idx
-        else:
-            start = max(vid_length - clip_duration, 0)//2
+        if sampling=='uniform':
+            sampling_interval = int(vid_length/self.num_frames)
         
-        idx = np.linspace(0, clip_duration, num_frames+1).astype(int)[:num_frames]
+        clip_duration = int(self.num_frames * sampling_interval)  ### clip duration 
+        
+        start = randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
+        idx = np.linspace(0, clip_duration, self.num_frames+1).astype(int)[:self.num_frames]
+        
         frame_idx = start + idx
+        
+        if frame_idx[-1] > vid_length:
+            frame_idx = frame_idx[frame_idx<=vid_length] # remove indices that are grater than the length
+            frame_idx = list(islice(cycle(frame_idx), self.num_frames )) # repeat frames
+            frame_idx.sort()
+            frame_idx = np.asarray(frame_idx)
+        
         return frame_idx
 
 
@@ -274,13 +287,14 @@ class Rep_count(torch.utils.data.Dataset):
     def __getitem__(self, index):
          
         video_name = f"{self.data_dir}/{self.split}/{self.df.iloc[index]['name']}"
-        # print(os.path.isfile(video_name))
+        #print(os.path.isfile(video_name))
+        cap = cv2.VideoCapture(video_name)
         
         row = self.df.iloc[index]
         duration = row['num_frames']
-        cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])]
-        starts = cycle[0::2]
-        ends = cycle[1::2]
+        clc = [int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])]
+        starts = clc[0::2]
+        ends = clc[1::2]
         exemplar_index = random.randint(0, len(starts)-1)
         exemplar_start = starts[exemplar_index]  ## divide by fps tp convert to secs
         exemplar_end = ends[exemplar_index]
@@ -292,11 +306,7 @@ class Rep_count(torch.utils.data.Dataset):
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx, duration=duration-1)
         
-        label = normalize_label(cycle, duration) ## computing density map over entire video
-        # plt.plot(range(len(label)), label)
-        # plt.savefig('{}_density.png'.format(index))
-        # plt.close()
-        # print(label)
+        label = normalize_label(clc, duration) ## computing density map over entire video
 
         count = label[frame_idx[0]: frame_idx[-1]].sum()  ### calculating the actual count in the trimmed clip
         density = label[frame_idx] ## sampling the density map at the selected frame indices
@@ -311,6 +321,7 @@ class Rep_count(torch.utils.data.Dataset):
         if exemplar is not None:
             exemplar = self.transform_exemplar(exemplar/255) 
         
+        #print(f"frame ids: [{frame_idx[0]},{frame_idx[-1]}] | frames: {frame_idx[-1]-frame_idx[0]}/{duration} [{(frame_idx[-1]-frame_idx[0])/duration:.2f}] | reps: {count}/{len(starts)} [{count/len(starts):.2f}]")
         
         return vid, exemplar, density, count, self.df.iloc[index]['name'][:-4]
             
@@ -322,18 +333,35 @@ class Rep_count(torch.utils.data.Dataset):
 ## testing
 if __name__=='__main__':
     from tqdm import tqdm
-    dat = Rep_count()
+    dat = Rep_count(data_dir = "data/LLSP/")
     print('dataset created')
     device = torch.device("cpu")
     print(f'Device: {device}')
-    dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=1,shuffle=False,pin_memory=False,drop_last=True)
+    dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=10,shuffle=False,pin_memory=False,drop_last=True)
+    
+    sum_clip_dur = []
+    sum_tot_dur = []
+    sum_clip_counts = []
+    sum_tot_counts = []
+    
+    fps = []
     
     for i, item in enumerate(tqdm(dataloader)):
-        print(i)
-        print(i,item[0].shape)
+        sum_clip_dur.append(item[0])
+        sum_tot_dur.append(item[1])
+        sum_clip_counts.append(item[2])
+        sum_tot_counts.append(item[3])
+        
+        fps.append(item[4])
+        
         # print(i, item[1].shape)
         # print(i, item[2].shape)
         # print(item[2])
+    
+    print(f"Avg clip dur: {sum(sum_clip_dur)/len(sum_clip_dur)} | Avg vid dur: {sum(sum_tot_dur)/len(sum_tot_dur)}")
+    print(f"Avg clip reps: {sum(sum_clip_counts)/len(sum_clip_counts)} | Avg vid counts: {sum(sum_tot_counts)/len(sum_tot_counts)}")
+    print(sum(fps)/len(fps))
+    
     
         
     

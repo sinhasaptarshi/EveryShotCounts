@@ -5,6 +5,7 @@ import os
 from Rep_count import Rep_count
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE
+from video_memae import RepMem
 from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
 import argparse
@@ -47,7 +48,7 @@ def get_args_parser():
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=2, metavar='N',
                         help='epochs to warmup LR')
-    parser.add_argument('--eval_freq', default=5, type=int)
+    parser.add_argument('--eval_freq', default=1, type=int)
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/', type=str,
@@ -69,7 +70,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
                         help='resume from checkpoint')
-    parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
+    parser.add_argument('--pretrained_encoder', default=None, type=str)
 
     # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -101,6 +102,12 @@ def get_args_parser():
     return parser
 
 
+def collate_fn(batch):
+  return (torch.stack([x[0].unsqueeze(0) for x in batch]),
+          torch.stack([x[1].unsqueeze(0) for x in batch]),
+          torch.tensor([x[2] for x in batch]),
+          torch.tensor([x[3] for x in batch]))
+
 
 def main():
     # parser = argparse.ArgumentParser(
@@ -126,35 +133,43 @@ def main():
     dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
     
     # Create dict of dataloaders for train and val
-    dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
+    dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,
+                                                       batch_size=args.batch_size,
                                                        num_workers=args.num_workers,
                                                        shuffle=True,
-                                                       pin_memory=True,
+                                                       pin_memory=False,
                                                        drop_last=True),
                    'val':torch.utils.data.DataLoader(dataset_val,
                                                      batch_size=args.batch_size,
                                                      num_workers=args.num_workers,
                                                      shuffle=False,
-                                                     pin_memory=True,
+                                                     pin_memory=False,
                                                      drop_last=True)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     
     model = SupervisedMAE(cfg=cfg).cuda()
+    #model = RepMem().cuda()
+    
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
+    
     
     if args.pretrained_encoder:
         state_dict = torch.load(args.pretrained_encoder)['model_state']
     else:
         state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
-    
+
+    loaded=0
     for name, param in state_dict.items():
+        if 'module.' not in name: # fix for dataparallel
+            name = 'module.'+name
         if name in model.state_dict().keys():
             if 'decoder' not in name:
-                print(name)
+                loaded += 1
                 # new_name = name.replace('quantizer.', '')
                 model.state_dict()[name].copy_(param)
+    print(f"--- Loaded {loaded} params from statedict ---")
     
     optimizer = torch.optim.AdamW(param_groups, lr=args.blr, betas=(0.9, 0.95))
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
@@ -194,7 +209,6 @@ def main():
                         elif phase == 'val':
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
-                            
                             data = item[0].cuda() # B x C x T x H x W
                             example = item[1].cuda() # B x C x T' x H x W
                             actual_counts = item[3].cuda() # B x 1
@@ -264,6 +278,8 @@ def main():
                         })
                     
                     if phase == 'val':
+                        if not os.path.isdir(args.save_path):
+                            os.makedirs(args.save_path)
                         wandb.log({"epoch": epoch, 
                             "val_loss": total_loss_all/float(count), 
                             "val_loss1": total_loss1/float(count), 
