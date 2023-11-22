@@ -17,12 +17,61 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--num_gpus', default=4, type=int)
     parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
+    parser.add_argument('--save_example_encodings', default=True, type=bool)
     return parser
+
+def save_exemplar(dataloaders, model):
+    for split in ['train', 'val']:
+        for i, item in enumerate(dataloaders[split]):
+            video = item[0].squeeze(0)
+            starts = item[-3]
+            ends = item[-2]
+            print(ends)
+            video_name = item[-1][0]
+            # print(video_name)
+            C, T, H, W = video.shape
+
+            clip_list = []
+            num_examples = len(starts)
+            for j in range(num_examples):
+                idx = np.linspace(starts[j].item(), ends[j].item(), 16)
+                clips = video[:, idx]
+                clip_list.append(clips)
+            
+            data = torch.stack(clip_list).cuda()
+            print(data.shape)
+            with torch.no_grad():
+                encoded = model(data)
+            print(encoded.shape)
+            
+            # np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
+
+def save_tokens(dataloaders, model):
+    for split in ['train', 'val']:
+        for i, item in enumerate(dataloaders[split]):
+            video = item[0].squeeze(0)
+            video_name = item[-1][0]
+            print(video_name)
+            C, T, H, W = video.shape
+
+            clip_list = []
+            for j in range(0, T-64, 16): #### 75% overlap
+                idx = np.linspace(j, j+64, 17)[:16]
+                clips = video[:,idx]
+                clip_list.append(clips)
+            data = torch.stack(clip_list).cuda()
+            with torch.no_grad():
+                encoded = model(data)
+            # print(encoded.shape)
+            
+            # np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
+
 
 def main():
     parser = get_args_parser()
     args = parser.parse_args()
     args.opts = None
+    args.save_video_encodings = not args.save_example_encodings
     args.data_path = '/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/'
 
     
@@ -57,26 +106,12 @@ def main():
                 print(name)
                 # new_name = name.replace('quantizer.', '')
                 model.state_dict()[name].copy_(param)
+    if args.save_video_encodings:
+        save_tokens(dataloaders, model)
+    elif args.save_example_encodings:
+        save_exemplar(dataloaders, model)
 
-    for split in ['train', 'val']:
-        for i, item in enumerate(dataloaders[split]):
-            video = item[0].squeeze(0)
-            video_name = item[-1][0]
-            print(video_name)
-            C, T, H, W = video.shape
-
-            clip_list = []
-            for j in range(0, T-64, 16): #### 75% overlap
-                idx = np.linspace(j, j+64, 17)[:16]
-                clips = video[:,idx]
-                clip_list.append(clips)
-            data = torch.stack(clip_list).cuda()
-            with torch.no_grad():
-                encoded = model(data)
-            # print(encoded.shape)
-            
-            np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
-
+    
 
 if __name__ == '__main__':
     main()

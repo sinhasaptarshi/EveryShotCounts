@@ -312,7 +312,7 @@ class Rep_count(torch.utils.data.Dataset):
             exemplar = self.transform_exemplar(exemplar/255) 
         
         
-        return vid, exemplar, density, count, self.df.iloc[index]['name'][:-4]
+        return vid, exemplar, density, count, starts, ends, self.df.iloc[index]['name'][:-4]
             
 
     def __len__(self):
