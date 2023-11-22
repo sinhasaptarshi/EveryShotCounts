@@ -37,7 +37,7 @@ class SupervisedMAE(nn.Module):
     def __init__(self, cfg=None, img_size=384, patch_size=16, in_chans=3,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -45,6 +45,7 @@ class SupervisedMAE(nn.Module):
 
         num_classes = cfg.MODEL.NUM_CLASSES
         embed_dim = cfg.MVIT.EMBED_DIM
+        self.just_encode = just_encode
         # Prepare backbone
         pool_first = cfg.MVIT.POOL_FIRST
         num_heads = cfg.MVIT.NUM_HEADS
@@ -514,13 +515,15 @@ class SupervisedMAE(nn.Module):
 
     #     return x
 
-    def forward(self, vid, yi, boxes=None, shot_num=0):
+    def forward(self, vid, yi=None, boxes=None, shot_num=0):
         # if boxes.nelement() > 0:
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
         y1 = []
         with torch.no_grad():
             latent, _ = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
             latent = latent[:, 1:]
+            if self.just_encode:
+                return latent
             # print(_)
         x = self.decoder_embed(latent)
         x = x + self.decoder_pos_embed

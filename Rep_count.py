@@ -15,6 +15,7 @@ import random
 from label_norm import normalize_label
 from pytorchvideo.data.utils import thwc_to_cthw
 from itertools import islice
+import matplotlib.pyplot as plt
 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import CenterCropVideo, NormalizeVideo
@@ -273,8 +274,7 @@ class Rep_count(torch.utils.data.Dataset):
     def __getitem__(self, index):
          
         video_name = f"{self.data_dir}/{self.split}/{self.df.iloc[index]['name']}"
-        print(os.path.isfile(video_name))
-        cap = cv2.VideoCapture(video_name)
+        # print(os.path.isfile(video_name))
         
         row = self.df.iloc[index]
         duration = row['num_frames']
@@ -287,11 +287,16 @@ class Rep_count(torch.utils.data.Dataset):
         exemplar_frameidx = np.linspace(exemplar_start, exemplar_end, 3).astype(int)
         
         frame_idx = self.get_vid_clips(duration-1, mode=self.split)
+        frame_idx = range(duration)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx, duration=duration-1)
         
         label = normalize_label(cycle, duration) ## computing density map over entire video
+        # plt.plot(range(len(label)), label)
+        # plt.savefig('{}_density.png'.format(index))
+        # plt.close()
+        # print(label)
 
         count = label[frame_idx[0]: frame_idx[-1]].sum()  ### calculating the actual count in the trimmed clip
         density = label[frame_idx] ## sampling the density map at the selected frame indices
@@ -307,7 +312,7 @@ class Rep_count(torch.utils.data.Dataset):
             exemplar = self.transform_exemplar(exemplar/255) 
         
         
-        return vid, exemplar, density, count#, video_name
+        return vid, exemplar, density, count, self.df.iloc[index]['name'][:-4]
             
 
     def __len__(self):
