@@ -117,8 +117,14 @@ class Rep_count(torch.utils.data.Dataset):
                  cfg = None,
                  jittering=False,
                  add_noise= False,
+                 sampling='uniform',
+                 encode_only=False,
+                 sampling_interval=4,
                  data_dir = "/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/"):
         
+        self.sampling = sampling
+        self.sampling_interval = sampling_interval
+        self.encode_only = encode_only
         self.data_dir = data_dir
         self.split = split # set the split to load
         self.jittering = jittering # temporal jittering (augmentation)
@@ -170,7 +176,7 @@ class Rep_count(torch.utils.data.Dataset):
 
         return label
     
-    def get_vid_clips(self,vid_length, sampling_interval=4, sampling='random'):
+    def get_vid_clips(self,vid_length):
         
         """
         get_vid_clips.
@@ -182,11 +188,13 @@ class Rep_count(torch.utils.data.Dataset):
             num_frames (int, optional): number of frames to be sampled. Default is 16
             sampling_interval (int, optional): sample one frame every N frames. Default is 4
         """
+        if self.encode_only:
+            return np.asarray([d for d in range(0,vid_length,self.sampling_interval)])
         
-        if sampling=='uniform':
-            sampling_interval = int(vid_length/self.num_frames)
+        if self.sampling=='uniform':
+            self.sampling_interval = int(vid_length/self.num_frames)
         
-        clip_duration = int(self.num_frames * sampling_interval)  ### clip duration 
+        clip_duration = int(self.num_frames * self.sampling_interval)  ### clip duration 
         
         start = randint(0, max(vid_length-clip_duration, 0))  ### sample a start frame randomly
         idx = np.linspace(0, clip_duration, self.num_frames+1).astype(int)[:self.num_frames]
@@ -300,8 +308,7 @@ class Rep_count(torch.utils.data.Dataset):
         exemplar_end = ends[exemplar_index]
         exemplar_frameidx = np.linspace(exemplar_start, exemplar_end, 3).astype(int)
         
-        frame_idx = self.get_vid_clips(duration-1, mode=self.split)
-        frame_idx = range(duration)
+        frame_idx = self.get_vid_clips(duration-1)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx, duration=duration-1)

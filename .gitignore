@@ -15,3 +15,7 @@
 *.jpg
 *.out
 *.pyth
+saved_tokens/
+saved_models/
+data/
+checkpoints/

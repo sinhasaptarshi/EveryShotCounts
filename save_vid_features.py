@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -8,6 +9,8 @@ from video_mae_cross import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
 
+import tqdm
+
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=1, type=int,
@@ -16,14 +19,14 @@ def get_args_parser():
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--num_gpus', default=4, type=int)
-    parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
+    parser.add_argument('--pretrained_encoder', default = None, type=str)
     return parser
 
 def main():
     parser = get_args_parser()
     args = parser.parse_args()
     args.opts = None
-    args.data_path = '/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/'
+    args.data_path = 'data/LLSP/'
 
     
 
@@ -32,21 +35,27 @@ def main():
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     model.eval()
 
-    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
-    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path)
+    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path,sampling_interval=1,encode_only=True)
+    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path,sampling_interval=1,encode_only=True)
     dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
-                                                       num_workers=4,
-                                                       shuffle=True,
+                                                       num_workers=10,
+                                                       shuffle=False,
                                                        pin_memory=True,
-                                                       drop_last=True),
+                                                       drop_last=False),
                    'val':torch.utils.data.DataLoader(dataset_val,
                                                      batch_size=args.batch_size,
-                                                     num_workers=4,
+                                                     num_workers=10,
                                                      shuffle=False,
                                                      pin_memory=True,
-                                                     drop_last=True)}
+                                                     drop_last=False),
+                   'test':torch.utils.data.DataLoader(dataset_test,
+                                                     batch_size=args.batch_size,
+                                                     num_workers=10,
+                                                     shuffle=False,
+                                                     pin_memory=True,
+                                                     drop_last=False)}
     if args.pretrained_encoder:
         state_dict = torch.load(args.pretrained_encoder)['model_state']
     else:
@@ -59,11 +68,14 @@ def main():
                 model.state_dict()[name].copy_(param)
 
     for split in ['train', 'val']:
-        for i, item in enumerate(dataloaders[split]):
+        for i, item in tqdm.tqdm(enumerate(dataloaders[split]),total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
-            C, T, H, W = video.shape
+            target = 'saved_tokens/{}/{}.npz'.format(split, video_name)
+            if os.path.isfile(target):
+                continue
+            _,T,_,_ = video.shape
 
             clip_list = []
             for j in range(0, T-64, 16): #### 75% overlap
@@ -71,12 +83,16 @@ def main():
                 clips = video[:,idx]
                 clip_list.append(clips)
             data = torch.stack(clip_list).cuda()
+            print(data.shape)
             with torch.no_grad():
-                encoded = model(data)
-            # print(encoded.shape)
+                with torch.cuda.amp.autocast(enabled=True):
+                    encoded = model(data)
+            print(encoded.shape)
             
-            np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
-
+            if not os.path.isdir(f'saved_tokens/{split}'):
+                os.makedirs(f'saved_tokens/{split}')
+            np.savez(target, encoded.cpu().numpy())
+            torch.cuda.empty_cache() 
 
 if __name__ == '__main__':
     main()
