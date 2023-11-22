@@ -60,7 +60,7 @@ def main():
 
     for split in ['train', 'val']:
         for i, item in enumerate(dataloaders[split]):
-            video = item[0].squeeze(0).cuda()
+            video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
             C, T, H, W = video.shape
@@ -70,12 +70,12 @@ def main():
                 idx = np.linspace(j, j+64, 17)[:16]
                 clips = video[:,idx]
                 clip_list.append(clips)
-            data = torch.stack(clip_list)
+            data = torch.stack(clip_list).cuda()
             with torch.no_grad():
                 encoded = model(data)
             # print(encoded.shape)
-            for j in range(encoded.shape[0]):
-                torch.save(encoded[j], 'saved_tokens/{}/{}_{}.pkl'.format(split, video_name, j))
+            
+            np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
 
 
 if __name__ == '__main__':
