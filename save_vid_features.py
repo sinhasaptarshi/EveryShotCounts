@@ -20,11 +20,11 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--num_gpus', default=4, type=int)
     parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
-    parser.add_argument('--save_example_encodings', default=True, type=bool)
+    parser.add_argument('--save_example_encodings', default=False, type=bool)
     return parser
 
 def save_exemplar(dataloaders, model):
-    for split in ['train','val', 'test']:
+    for split in ['test']:
         for i, item in enumerate(dataloaders[split]):
             video = item[0].squeeze(0)
             starts = item[-3]
@@ -55,7 +55,7 @@ def save_exemplar(dataloaders, model):
             np.savez('examplar_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
 
 def save_tokens(dataloaders, model):
-    for split in ['train', 'val']:
+    for split in ['test', 'val', 'train']:
         for i, item in enumerate(dataloaders[split]):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
@@ -64,7 +64,7 @@ def save_tokens(dataloaders, model):
 
             clip_list = []
             for j in range(0, T-64, 16): #### 75% overlap
-                idx = np.linspace(j, j+64, 17)[:16]
+                idx = np.linspace(j, j+64, 17)[:16].astype(int)
                 clips = video[:,idx]
                 clip_list.append(clips)
             data = torch.stack(clip_list).cuda()
@@ -73,7 +73,7 @@ def save_tokens(dataloaders, model):
                     encoded = model(data)
             # print(encoded.shape)
             
-            # np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
+            np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
 
 
 def main():
@@ -92,7 +92,7 @@ def main():
 
     dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path,sampling_interval=1,encode_only=True)
     dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path,sampling_interval=1,encode_only=True)
-    dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
+    dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path,sampling_interval=1,encode_only=True)
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
                                                        num_workers=10,

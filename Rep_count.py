@@ -189,7 +189,7 @@ class Rep_count(torch.utils.data.Dataset):
             sampling_interval (int, optional): sample one frame every N frames. Default is 4
         """
         if self.encode_only:
-            return np.asarray([d for d in range(0,vid_length,self.sampling_interval)])
+            return np.asarray([d for d in range(0,vid_length+1,self.sampling_interval)])
         
         if self.sampling=='uniform':
             self.sampling_interval = int(vid_length/self.num_frames)
