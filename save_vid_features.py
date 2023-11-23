@@ -12,20 +12,17 @@ import argparse
 import tqdm
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
+    parser = argparse.ArgumentParser('MAE encoding', add_help=False)
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=40, type=int)
-    parser.add_argument('--accum_iter', default=1, type=int,
-                        help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--num_gpus', default=4, type=int)
-    parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
-    parser.add_argument('--save_example_encodings', default=True, type=bool)
+    parser.add_argument('--pretrained_encoder', default =True, type=lambda x: (str(x).lower() == 'true'))
+    parser.add_argument('--save_exemplar_encodings', default=True, type=lambda x: (str(x).lower() == 'true'))
     return parser
 
 def save_exemplar(dataloaders, model):
     for split in ['train','val', 'test']:
-        for i, item in enumerate(dataloaders[split]):
+        for i, item in tqdm.tqdm(enumerate(dataloaders[split]),total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             starts = item[-3]
             ends = item[-2]
@@ -34,9 +31,9 @@ def save_exemplar(dataloaders, model):
             C, T, H, W = video.shape
 
             clip_list = []
-            num_examples = len(starts)
+            num_exemplars = len(starts)
             # if split == 'train':
-            for j in range(num_examples):
+            for j in range(num_exemplars):
                 idx = np.linspace(starts[j].item(), ends[j].item(), 17)[:16].astype(int)
                 clips = video[:, idx]
                 clip_list.append(clips)
@@ -46,17 +43,23 @@ def save_exemplar(dataloaders, model):
             #     clip_list.append(clips)
             
             data = torch.stack(clip_list).cuda()
-            print(data.shape)
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=True):
-                    encoded = model(data)
-            # print(encoded.shape)
+                    encoded, thw = model(data)
+                    encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
+            print(encoded.shape)
+            enc_np = encoded.cpu().numpy()
+            del encoded, data
+            torch.cuda.empty_cache()
             
-            np.savez('examplar_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
+            if not os.path.isdir(f'exemplar_tokens/{split}'):
+                os.makedirs(f'exemplar_tokens/{split}')
+                
+            np.savez('exemplar_tokens/{}/{}.npz'.format(split, video_name), enc_np)
 
 def save_tokens(dataloaders, model):
-    for split in ['train', 'val']:
-        for i, item in enumerate(dataloaders[split]):
+    for split in ['train', 'val', 'test']:
+        for i, item in tqdm.tqdm(enumerate(dataloaders[split]),total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
@@ -70,18 +73,25 @@ def save_tokens(dataloaders, model):
             data = torch.stack(clip_list).cuda()
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=True):
-                    encoded = model(data)
+                    encoded, thw = model(data)
+                    encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
             # print(encoded.shape)
+            enc_np = encoded.cpu().numpy()
+            del encoded, data
+            torch.cuda.empty_cache()
             
-            # np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), encoded.cpu().numpy())
+            if not os.path.isdir(f'saved_tokens/{split}'):
+                os.makedirs(f'saved_tokens/{split}')
+            
+            np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), enc_np)
 
 
 def main():
     parser = get_args_parser()
     args = parser.parse_args()
     args.opts = None
-    args.save_video_encodings = not args.save_example_encodings
-    args.data_path = '/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/'
+    args.save_video_encodings = not args.save_exemplar_encodings
+    args.data_path = 'data/LLSP/'
 
     
 
@@ -95,26 +105,25 @@ def main():
     dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
-                                                       num_workers=10,
+                                                       num_workers=2,
                                                        shuffle=False,
                                                        pin_memory=True,
                                                        drop_last=False),
                    'val':torch.utils.data.DataLoader(dataset_val,
                                                      batch_size=args.batch_size,
-                                                     num_workers=10,
+                                                     num_workers=2,
                                                      shuffle=False,
                                                      pin_memory=True,
                                                      drop_last=False),
                    'test':torch.utils.data.DataLoader(dataset_test,
                                                      batch_size=args.batch_size,
-                                                     num_workers=10,
+                                                     num_workers=2,
                                                      shuffle=False,
                                                      pin_memory=True,
                                                      drop_last=False)}
     if args.pretrained_encoder:
-        state_dict = torch.load(args.pretrained_encoder)['model_state']
-    else:
         state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+        
     for name, param in state_dict.items():
         if name in model.state_dict().keys():
             if 'decoder' not in name:
@@ -123,7 +132,7 @@ def main():
                 model.state_dict()[name].copy_(param)
     if args.save_video_encodings:
         save_tokens(dataloaders, model)
-    elif args.save_example_encodings:
+    elif args.save_exemplar_encodings:
         save_exemplar(dataloaders, model)
 
     
