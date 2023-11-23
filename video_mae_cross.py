@@ -520,10 +520,10 @@ class SupervisedMAE(nn.Module):
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
         y1 = []
         with torch.no_grad():
-            latent, _ = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
+            latent, thw = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
             latent = latent[:, 1:]
             if self.just_encode:
-                return latent
+                return latent, thw
             # print(_)
         x = self.decoder_embed(latent)
         x = x + self.decoder_pos_embed
