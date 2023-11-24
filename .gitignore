@@ -19,4 +19,6 @@ saved_tokens/
 saved_models/
 data/
 checkpoints/
+examplar_tokens/
+gt_density_maps/
 exemplar_tokens/

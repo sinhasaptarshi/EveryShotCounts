@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
-from Rep_count import Rep_count
+from Rep_count_loader import Rep_count
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE
 from video_memae import RepMem
@@ -14,7 +14,7 @@ import torch.optim as optim
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=12, type=int,
+    parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=40, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -70,7 +70,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
                         help='resume from checkpoint')
-    parser.add_argument('--pretrained_encoder', default=None, type=str)
+    parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
 
     # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -155,21 +155,21 @@ def main():
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
     
-    if args.pretrained_encoder:
-        state_dict = torch.load(args.pretrained_encoder)['model_state']
-    else:
-        state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+    # if args.pretrained_encoder:
+    #     state_dict = torch.load(args.pretrained_encoder)['model_state']
+    # else:
+    #     state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
 
-    loaded=0
-    for name, param in state_dict.items():
-        if 'module.' not in name: # fix for dataparallel
-            name = 'module.'+name
-        if name in model.state_dict().keys():
-            if 'decoder' not in name:
-                loaded += 1
-                # new_name = name.replace('quantizer.', '')
-                model.state_dict()[name].copy_(param)
-    print(f"--- Loaded {loaded} params from statedict ---")
+    # loaded=0
+    # for name, param in state_dict.items():
+    #     if 'module.' not in name: # fix for dataparallel
+    #         name = 'module.'+name
+    #     if name in model.state_dict().keys():
+    #         if 'decoder' not in name:
+    #             loaded += 1
+    #             # new_name = name.replace('quantizer.', '')
+    #             model.state_dict()[name].copy_(param)
+    # print(f"--- Loaded {loaded} params from statedict ---")
     
     optimizer = torch.optim.AdamW(param_groups, lr=args.blr, betas=(0.9, 0.95))
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
@@ -210,6 +210,7 @@ def main():
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
                             data = item[0].cuda() # B x C x T x H x W
+                            print(data.shape)
                             example = item[1].cuda() # B x C x T' x H x W
                             actual_counts = item[3].cuda() # B x 1
             

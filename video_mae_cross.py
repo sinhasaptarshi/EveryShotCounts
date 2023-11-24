@@ -18,6 +18,8 @@ from models_crossvit import CrossAttentionBlock
 from util.pos_embed import get_2d_sincos_pos_embed
 import logging
 
+
+
 def round_width(width, multiplier, min_width=1, divisor=1, verbose=False):
     if not multiplier:
         return width
@@ -256,31 +258,31 @@ class SupervisedMAE(nn.Module):
         self.shot_token = nn.Parameter(torch.zeros(512))
 
         # Exemplar encoder with CNN
-        self.decoder_proj1 = nn.Sequential(
-            nn.Conv3d(3, 64, kernel_size=3, stride=1, padding=1),
-            nn.InstanceNorm3d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d((1,2,2)) #[3,64,64]->[64,32,32]
-        )
-        self.decoder_proj2 = nn.Sequential(
-            nn.Conv3d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.InstanceNorm3d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d((1, 2, 2)) #[64,32,32]->[128,16,16]
-        )
-        self.decoder_proj3 = nn.Sequential(
-            nn.Conv3d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.InstanceNorm3d(256),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d((1, 2, 2)) # [128,16,16]->[256,8,8]
-        )
-        self.decoder_proj4 = nn.Sequential(
-            nn.Conv3d(256, decoder_embed_dim, kernel_size=3, stride=1, padding=1),
-            nn.InstanceNorm3d(512),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool3d((1,1,1))
-            # [256,8,8]->[512,1,1]
-        )
+        # self.decoder_proj1 = nn.Sequential(
+        #     nn.Conv3d(768, 512, kernel_size=3, stride=1, padding=1),
+        #     nn.InstanceNorm3d(64),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool3d((1,2,2)) #[3,64,64]->[64,32,32]
+        # )
+        # self.decoder_proj2 = nn.Sequential(
+        #     nn.Conv3d(64, 128, kernel_size=3, stride=1, padding=1),
+        #     nn.InstanceNorm3d(128),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool3d((1, 2, 2)) #[64,32,32]->[128,16,16]
+        # )
+        # self.decoder_proj3 = nn.Sequential(
+        #     nn.Conv3d(128, 256, kernel_size=3, stride=1, padding=1),
+        #     nn.InstanceNorm3d(256),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool3d((1, 2, 2)) # [128,16,16]->[256,8,8]
+        # )
+        # self.decoder_proj4 = nn.Sequential(
+        #     nn.Conv3d(256, decoder_embed_dim, kernel_size=3, stride=1, padding=1),
+        #     nn.InstanceNorm3d(512),
+        #     nn.ReLU(inplace=True),
+        #     nn.AdaptiveAvgPool3d((1,1,1))
+        #     # [256,8,8]->[512,1,1]
+        # )
 
 
         self.decoder_blocks = nn.ModuleList([
@@ -366,6 +368,15 @@ class SupervisedMAE(nn.Module):
 
         return pos_embed
 
+    @torch.no_grad()
+    def sincos_pos_embed(self, max_len=1000, embed_dim=768, n=10000):
+        div_term = torch.exp(torch.arange(0, embed_dim, 2) * -(math.log(n) / embed_dim))
+        k = torch.arange(0, max_len).unsqueeze(1)     
+        pe = torch.zeros(max_len, embed_dim)
+        pe[:, 0::2] = torch.sin(k * div_term)
+        pe[:, 1::2] = torch.cos(k * div_term)
+        pe = pe.unsqueeze(0) 
+        return pe
 
     def initialize_weights(self):
         # initialization
@@ -515,27 +526,36 @@ class SupervisedMAE(nn.Module):
 
     #     return x
 
-    def forward(self, vid, yi=None, boxes=None, shot_num=0):
+    def forward(self, latent, yi=None, boxes=None, shot_num=0):
         # if boxes.nelement() > 0:
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
         y1 = []
-        with torch.no_grad():
-            latent, thw = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
-            latent = latent[:, 1:]
-            if self.just_encode:
-                return latent, thw
+        # with torch.no_grad():
+        #     latent, thw = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
+        #     latent = latent[:, 1:]
+        #     if self.just_encode:
+        #         return latent, thw
             # print(_)
         x = self.decoder_embed(latent)
-        x = x + self.decoder_pos_embed
-        # print(x.shape)
-        yi = self.decoder_proj1(yi)
-        yi = self.decoder_proj2(yi)
-        yi = self.decoder_proj3(yi)
-        yi = self.decoder_proj4(yi)  ### (B, 512, 1, 1, 1)
+        # x = x + self.decoder_pos_embed
+        x = x + self.sincos_pos_embed(x.shape[1], x.shape[2]).to(x.device)
+
+        yi = self.decoder_embed(yi)
+        # print(yi.shape)
+        yi = yi.mean(2).squeeze(1)
         # print(yi.shape)
 
-        N, C, _, _, _ = yi.shape
-        y1.append(yi.squeeze(-1).squeeze(-1).squeeze(-1)) 
+        # print(x.shape)
+        # yi = self.decoder_proj1(yi)
+        # yi = self.decoder_proj2(yi)
+        # yi = self.decoder_proj3(yi)
+        # yi = self.decoder_proj4(yi)  ### (B, 512, 1, 1, 1)
+        # print(yi.shape)
+
+        # N, C, _, _, _ = yi.shape
+        # y1.append(yi.squeeze(-1).squeeze(-1).squeeze(-1)) 
+        N, C = yi.shape
+        y1.append(yi)
         y = torch.cat(y1,dim=0).reshape(1,N,C).to(x.device)
         y = y.transpose(0,1)
         for blk in self.decoder_blocks:
