@@ -14,6 +14,8 @@ def reshape_tokens(path):
             print(data)
             continue
         z = np.load(data)['arr_0']
+        if len(z.shape) == 5:
+            continue
         reshape_z = z.transpose((0,2,1))
         N, C, THW = reshape_z.shape
         reshape_z = z.reshape(N, C, T, H, W)
@@ -21,7 +23,7 @@ def reshape_tokens(path):
 
 def main():
     paths = []
-    for f in ['examplar_tokens', 'saved_tokens']:
+    for f in ['exemplar_tokens', 'saved_tokens']:
         for folder in ['train', 'val', 'test']:
             paths.append(os.path.join(f, folder))
     Parallel(n_jobs=6)(delayed(reshape_tokens)(path) for path in paths)

@@ -2,8 +2,10 @@ import pandas as pd
 import numpy  as np
 import scipy.ndimage as ndimage
 
+import os
+
 for split in ['train', 'validtest']:
-    df = pd.read_csv('datasets/repcount/{}_with_fps.csv'.format(split))
+    df = pd.read_csv(f"datasets/repcount/{split}_with_fps.csv")
     for index in range(len(df)):
         row = df.iloc[index]
         clc = np.array([int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])])
@@ -25,5 +27,8 @@ for split in ['train', 'validtest']:
             segment = ndimage.gaussian_filter1d(segment, sigma=len(segment)/6, order = 0)
             gt_density[starts[i]:(ends[i])] = segment
         
-        np.savez('gt_density_maps/{}'.format(video_name), gt_density)
+        if not os.path.isdir(f"gt_density_maps"):
+            os.makedirs("gt_density_maps")
+        
+        np.savez(f"gt_density_maps/{video_name}", gt_density)
 

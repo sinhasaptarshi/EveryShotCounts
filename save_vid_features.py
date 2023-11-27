@@ -17,12 +17,12 @@ def get_args_parser():
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--num_gpus', default=4, type=int)
     parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
-    parser.add_argument('--save_example_encodings', default=False, type=bool)
+    parser.add_argument('--save_exemplar_encodings', default=False, type=bool)
     return parser
 
 def save_exemplar(dataloaders, model):
-    for split in ['test']:
-        for i, item in enumerate(dataloaders[split]):
+    for split in ['train', 'val','test']:
+        for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             starts = item[-3]
             ends = item[-2]
@@ -43,11 +43,28 @@ def save_exemplar(dataloaders, model):
             #     clip_list.append(clips)
             
             data = torch.stack(clip_list).cuda()
+            print(data.shape)
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=True):
+                    '''
+                    if data.shape[0] > 64:
+                        encoded, thw = [], []
+                        ids = [ix for ix in range(64,data.shape[0],64)]
+                        if data.shape[0] - ids[-1] > 0:
+                            ids.append(data.shape[0])
+                        ids_s = [ix for ix in range(0,data.shape[0],64)]
+                        for id_s,id_f in zip(ids_s,ids):
+                            enc,thw_ = model(data[id_s:id_f,...])
+                            encoded.append(enc)
+                            thw.append(thw_)
+                        encoded =  torch.cat(encoded,dim=0)
+                        thw = thw[0]
+                    else:
+                    '''
                     encoded, thw = model(data)
                     encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
             print(encoded.shape)
+            
             enc_np = encoded.cpu().numpy()
             del encoded, data
             torch.cuda.empty_cache()
@@ -59,7 +76,7 @@ def save_exemplar(dataloaders, model):
 
 def save_tokens(dataloaders, model):
     for split in ['train', 'val', 'test']:
-        for i, item in tqdm.tqdm(enumerate(dataloaders[split]),total=len(dataloaders[split])):
+        for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
@@ -96,7 +113,7 @@ def main():
     
 
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
-    model = SupervisedMAE(cfg=cfg, just_encode=True).cuda()
+    model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False).cuda()
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     model.eval()
 
@@ -105,24 +122,25 @@ def main():
     dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path,sampling_interval=1,encode_only=True)
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
-                                                       num_workers=2,
+                                                       num_workers=8,
                                                        shuffle=False,
                                                        pin_memory=True,
                                                        drop_last=False),
                    'val':torch.utils.data.DataLoader(dataset_val,
                                                      batch_size=args.batch_size,
-                                                     num_workers=2,
+                                                     num_workers=8,
                                                      shuffle=False,
                                                      pin_memory=True,
                                                      drop_last=False),
                    'test':torch.utils.data.DataLoader(dataset_test,
                                                      batch_size=args.batch_size,
-                                                     num_workers=2,
+                                                     num_workers=8,
                                                      shuffle=False,
                                                      pin_memory=True,
                                                      drop_last=False)}
     if args.pretrained_encoder:
-        state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+        state_dict = torch.load(args.pretrained_encoder)['model_state']
+        #state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
         
     for name, param in state_dict.items():
         if name in model.state_dict().keys():
