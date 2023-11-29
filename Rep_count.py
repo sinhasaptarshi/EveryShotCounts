@@ -4,10 +4,7 @@ import torch.utils.data
 import os, sys
 import numpy as np
 import cv2
-import collections
-import skimage.draw
 import math
-import csv
 import av
 import pandas as pd
 from tqdm import tqdm
@@ -16,17 +13,7 @@ from label_norm import normalize_label
 from pytorchvideo.data.utils import thwc_to_cthw
 from itertools import cycle, islice
 
-from torchvision.transforms import Compose, Lambda
-from torchvision.transforms._transforms_video import CenterCropVideo, NormalizeVideo
-
 import pytorchvideo
-from pytorchvideo.transforms import (
-    ApplyTransformToKey,
-    ShortSideScale,
-    UniformTemporalSubsample,
-    Div255
-)
-from pytorchvideo.data.encoded_video import EncodedVideo
 
 
 import torch.multiprocessing

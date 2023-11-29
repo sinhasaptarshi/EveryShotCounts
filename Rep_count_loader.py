@@ -111,17 +111,31 @@ if __name__=='__main__':
     print('--- dataset created ---')
     device = torch.device("cpu")
     print(f'Device: {device}')
-    dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=1,shuffle=False,pin_memory=False,drop_last=True)
+    dataloader = torch.utils.data.DataLoader(dat,batch_size=1,num_workers=10,shuffle=False,pin_memory=False,drop_last=True)
     
     sum_clip_dur = []
     sum_tot_dur = []
     sum_clip_counts = []
     sum_tot_counts = []
     
+    density_maps_sum = {}
+    counts = {}
+    
     fps = []
     
     for i, item in enumerate(tqdm(dataloader)):
         print(f"It. {i} | vid tokens: {item[0].shape} | exem tokens: {item[1].shape} | density map: {item[2].shape}:{item[3]}")
+        #if int(item[3].item())!=int(item[5].item()):
+        #    print(item[3].item(),int(item[5].item()))
+        #if int(item[3].item()) not in density_maps_sum.keys():
+        #    density_maps_sum[int(item[3].item())] = 1
+        #else:
+        #    density_maps_sum[int(item[3].item())] += 1
+            
+        #if int(item[5]) not in counts.keys():
+        #    counts[int(item[5])] = 1
+        #else:
+        #    counts[int(item[5])] += 1
         #sum_clip_dur.append(item[0])
         #sum_tot_dur.append(item[1])
         #sum_clip_counts.append(item[2])
@@ -134,6 +148,10 @@ if __name__=='__main__':
         # print(i, item[2].shape)
         # print(item[2])
     
+    #for i in range(7):
+    #    if i in counts.keys() and i in density_maps_sum.keys():
+    #        print(i,counts[i],density_maps_sum[i])
+
     # print(f"Avg clip dur: {sum(sum_clip_dur)/len(sum_clip_dur)} | Avg vid dur: {sum(sum_tot_dur)/len(sum_tot_dur)}")
     # print(f"Avg clip reps: {sum(sum_clip_counts)/len(sum_clip_counts)} | Avg vid counts: {sum(sum_tot_counts)/len(sum_tot_counts)}")
     # print(sum(fps)/len(fps))
