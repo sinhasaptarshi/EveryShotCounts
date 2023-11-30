@@ -18,6 +18,8 @@ print(f"Length of the dataframe videos with no counts are further dropped: {trai
 
 ### selecting videos with count <=6
 selected_videos = train_df[train_df['count']<=6]
+selected_videos['segment_start'] = 0
+selected_videos['segment_end'] = selected_videos['num_frames']
 rem_videos = train_df[(train_df['count'] > 6)] ## videos with counts more than 6
 rem_videos.reset_index()
 counts = selected_videos['count']
@@ -42,6 +44,9 @@ for count, freq in zip(unique_counts.astype(int), freq):
         clc = np.array([int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])])
         starts = clc[0::2]
         ends = clc[1::2]
+        if np.random.rand() > 0.4:
+            if (starts[1:] - ends[0:-1]).max() <= 0:  ### checking if the selected video has interruptions
+                continue
         
         # get the duration of the repetition
         rep_durations = ends - starts
@@ -60,7 +65,9 @@ for count, freq in zip(unique_counts.astype(int), freq):
             if (select_ends[-1]-select_starts[0] < 64):
                 print(f'Selected random segment has less than {64} frames -> dropping (segment stats shown below)')
                 print(f"count: {count} \n starts: {select_starts} \n ends: {select_ends} \n frames: {select_ends[-1]-select_starts[0]}")
-            
+                continue
+            new_row['segment_start'] = select_starts[0] // 16 * 16
+            new_row['segment_end'] = new_row['segment_start'] + 512  ### getting segment start and end
             for i in range(count):
                 new_row[f"L{2*i + 1}"] = select_starts[i]
                 new_row[f"L{2*i + 2}"] = select_ends[i]
