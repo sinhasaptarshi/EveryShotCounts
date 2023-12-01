@@ -34,7 +34,7 @@ class Rep_count(torch.utils.data.Dataset):
         self.split = split # set the split to load
         self.add_noise = add_noise # add noise to frames (augmentation)
         if self.split == 'train':
-            csv_path = f"datasets/repcount/{self.split}_balanced.csv"
+            csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
         else:
             csv_path = f"datasets/repcount/validtest_with_fps.csv"
         self.df = pd.read_csv(csv_path)
@@ -60,8 +60,13 @@ class Rep_count(torch.utils.data.Dataset):
             tokens = tokens[idx:idx+1] ### return the encoding for a selected example per video instance
         else:
             if bounds is not None:
-                low_bound = bounds[0]//16
-            tokens = tokens[0::4] # non overlapping segments
+                low_bound = bounds[0]//64
+                up_bound = bounds[1]//64
+            else:
+                low_bound = 0
+                up_bound = None
+            # tokens = tokens[0::4] # non overlapping segments
+            tokens = tokens[low_bound:up_bound:4] ## non overlapping segments
                 
         
         tokens = torch.from_numpy(tokens)
@@ -71,10 +76,10 @@ class Rep_count(torch.utils.data.Dataset):
             
         tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
         
-        if bounds is not None:
-            start = bounds[0] // 8 ## Sampling every 4 frames and MViT temporally downsample T=16 -> 8 
-            end = bounds[1] // 8
-            tokens = tokens[:,start:end,:,:]
+        # if bounds is not None:
+        #     start = bounds[0] // 8 ## Sampling every 4 frames and MViT temporally downsample T=16 -> 8 
+        #     end = bounds[1] // 8
+        #     tokens = tokens[:,start:end,:,:]
             
         return tokens
 
