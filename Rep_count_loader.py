@@ -62,11 +62,13 @@ class Rep_count(torch.utils.data.Dataset):
             if bounds is not None:
                 low_bound = bounds[0]//64
                 up_bound = bounds[1]//64
-            else:
-                low_bound = 0
-                up_bound = None
-            # tokens = tokens[0::4] # non overlapping segments
-            tokens = tokens[low_bound:up_bound:4] ## non overlapping segments
+            # else:
+            #     low_bound = 0
+            #     up_bound = None
+            
+            # print(tokens.shape[0])
+            tokens = tokens[0::4] # non overlapping segments
+            tokens = tokens[low_bound:up_bound] ## non overlapping segments
                 
         
         tokens = torch.from_numpy(tokens)
@@ -84,9 +86,12 @@ class Rep_count(torch.utils.data.Dataset):
         return tokens
 
 
-    def load_density_map(self,path,count):
-        gt_density_map = np.load(path)['arr_0'][0::4]
-        return gt_density_map/gt_density_map.sum() * count  ##scale by count to make the sum consistent
+    def load_density_map(self,path,count, bound):
+        gt_density_map = np.load(path)['arr_0']#[0::4]
+        # gt_density_map = gt_density_map/gt_density_map.sum() * count 
+        gt_density_map = gt_density_map[(bound[0]//64 * 64):(bound[1]//64 * 64)]
+        # return gt_density_map
+        return  gt_density_map##scale by count to make the sum consistent
       
       
     
@@ -104,8 +109,8 @@ class Rep_count(torch.utils.data.Dataset):
 
         # --- Density map loading ---
         density_map_path = f"{self.density_maps_dir}/{video_name}"
-        gt_density = self.load_density_map(density_map_path,row['count'])  
-        gt_density = gt_density[segment_start:segment_end]
+        gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end))  
+        # gt_density = gt_density[segment_start:(segment_end//64 * 64)]
         
         # --- Video tokens loading ---
         # video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
