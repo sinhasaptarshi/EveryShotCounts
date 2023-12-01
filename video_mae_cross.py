@@ -39,7 +39,8 @@ class SupervisedMAE(nn.Module):
     def __init__(self, cfg=None, img_size=384, patch_size=16, in_chans=3,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False, use_precomputed=True):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False, 
+                 use_precomputed=True):
 
         super().__init__()
 
@@ -154,9 +155,10 @@ class SupervisedMAE(nn.Module):
 
         self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
-        self.blocks = nn.ModuleList([
-            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
-            for i in range(depth)])
+        if not self.use_precomputed:
+            self.blocks = nn.ModuleList([
+                Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+                for i in range(depth)]) 
         
         if self.cls_embed_on:
             self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -235,12 +237,14 @@ class SupervisedMAE(nn.Module):
 
             # if cfg.MODEL.ACT_CHECKPOINT:
             #     attention_block = checkpoint_wrapper(attention_block)
-            self.blocks.append(attention_block)
-            if len(stride_q[i]) > 0:
-                input_size = [
-                    size // stride
-                    for size, stride in zip(input_size, stride_q[i])
-                ]
+            
+            if not self.use_precomputed:
+                self.blocks.append(attention_block)
+                if len(stride_q[i]) > 0:
+                    input_size = [
+                        size // stride
+                        for size, stride in zip(input_size, stride_q[i])
+                    ]
 
             embed_dim = dim_out
 

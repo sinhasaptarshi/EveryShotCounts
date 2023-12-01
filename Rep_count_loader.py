@@ -134,7 +134,7 @@ class Rep_count(torch.utils.data.Dataset):
     def collate_fn(self, batch):
         from torch.nn.utils.rnn import pad_sequence
         
-            
+        # [1 x T1 x .... ], [1 x T2 x ....] => [2 x T2 x ....] (T2 > T1)    
         vids = pad_sequence([einops.rearrange(x[0],'C T H W -> T C H W') for x in batch])
         if self.compact:
             vids = einops.rearrange(vids, 'T B C H W -> B (T H W) C')

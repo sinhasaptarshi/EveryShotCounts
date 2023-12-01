@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import os
+import os, sys
 from Rep_count_loader import Rep_count
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE
@@ -14,7 +14,7 @@ import torch.optim as optim
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=1, type=int,
+    parser.add_argument('--batch_size', default=8, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=40, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -51,31 +51,29 @@ def get_args_parser():
     parser.add_argument('--eval_freq', default=1, type=int)
 
     # Dataset parameters
+    parser.add_argument('--precomputed', default=True, type=lambda x: (str(x).lower() == 'true'),
+                        help='flag to specify if precomputed tokens will be loaded')
     parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/', type=str,
                         help='dataset path')
-    parser.add_argument('--anno_file', default='annotation_FSC147_384.json', type=str,
-                     help='annotation json file')
-    parser.add_argument('--data_split_file', default='Train_Test_Val_FSC_147.json', type=str,
-                        help='data split json file')
-    parser.add_argument('--class_file', default='ImageClasses_FSC147.txt', type=str,
-                        help='class json file')
-    parser.add_argument('--im_dir', default='images_384_VarV2', type=str,
-                        help='images directory')
-    parser.add_argument('--gt_dir', default='gt_density_map_adaptive_384_VarV2', type=str,
-                        help='ground truth directory')
-    parser.add_argument('--output_dir', default='./data/out/fim6_dir',
-                        help='path where to save, empty for no saving')
+    parser.add_argument('--tokens_dir', default='saved_tokens', type=str,
+                        help='ground truth density map directory')
+    parser.add_argument('--exemplar_dir', default='exemplar_tokens', type=str,
+                        help='ground truth density map directory')
+    parser.add_argument('--gt_dir', default='gt_density_maps', type=str,
+                        help='ground truth density map directory')
+    
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
+    
+    # Training parameters    
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth',
-                        help='resume from checkpoint')
+    
+    #parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/pre_4_dir/checkpoint__pretraining_199.pth', help='resume from checkpoint')
     parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
 
-    # Training parameters
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=1, type=int)
+    parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -121,27 +119,44 @@ def main():
     
     
     
-    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path)
-    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path)
-    dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
+    if args.precomputed:
+        dataset_train = Rep_count(split="train",
+                                  tokens_dir = args.tokens_dir,
+                                  exemplar_dir = args.exemplar_dir,
+                                  density_maps_dir = args.gt_dir,
+                                  select_rand_segment=False, 
+                                  compact=True, 
+                                  pool_tokens_factor=0.5)
+        
+        dataset_valid = Rep_count(split="valid",
+                                  tokens_dir = args.tokens_dir,
+                                  exemplar_dir = args.exemplar_dir,
+                                  density_maps_dir = args.gt_dir,
+                                  select_rand_segment=False, 
+                                  compact=True, 
+                                  pool_tokens_factor=0.5)
     
-    # Create dict of dataloaders for train and val
-    dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,
-                                                       batch_size=args.batch_size,
-                                                       num_workers=args.num_workers,
-                                                       shuffle=True,
-                                                       pin_memory=False,
-                                                       drop_last=True),
-                   'val':torch.utils.data.DataLoader(dataset_val,
-                                                     batch_size=args.batch_size,
-                                                     num_workers=args.num_workers,
-                                                     shuffle=False,
-                                                     pin_memory=False,
-                                                     drop_last=True)}
+        #dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
+    
+        # Create dict of dataloaders for train and val
+        dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,
+                                                           batch_size=args.batch_size,
+                                                           num_workers=args.num_workers,
+                                                           shuffle=True,
+                                                           pin_memory=False,
+                                                           drop_last=False,
+                                                           collate_fn=dataset_train.collate_fn),
+                       'val':torch.utils.data.DataLoader(dataset_valid,
+                                                         batch_size=args.batch_size,
+                                                         num_workers=args.num_workers,
+                                                         shuffle=False,
+                                                         pin_memory=False,
+                                                         drop_last=False,
+                                                         collate_fn=dataset_valid.collate_fn)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     
-    model = SupervisedMAE(cfg=cfg).cuda()
+    model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed).cuda()
     #model = RepMem().cuda()
     
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
@@ -202,13 +217,15 @@ def main():
                         elif phase == 'val':
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
-                            data = item[0].cuda() # B x C x T x H x W
-                            print(data.shape)
-                            example = item[1].cuda() # B x C x T' x H x W
+                            data = item[0].cuda() # B x (THW) x C
+                            example = item[1].cuda() # B x (THW) x C
+                            density_map = item[2].cuda()
                             actual_counts = item[3].cuda() # B x 1
+                            
             
                             optimizer.zero_grad()
                             y = model(data, example)
+                            
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             if phase == 'val':
                                 ground_truth.append(actual_counts.detach().cpu().numpy())
