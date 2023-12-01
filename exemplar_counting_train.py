@@ -102,13 +102,6 @@ def get_args_parser():
     return parser
 
 
-def collate_fn(batch):
-  return (torch.stack([x[0].unsqueeze(0) for x in batch]),
-          torch.stack([x[1].unsqueeze(0) for x in batch]),
-          torch.tensor([x[2] for x in batch]),
-          torch.tensor([x[3] for x in batch]))
-
-
 def main():
     # parser = argparse.ArgumentParser(
     #     description="Provide SlowFast video training and testing pipeline."
