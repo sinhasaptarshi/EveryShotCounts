@@ -59,6 +59,8 @@ class Rep_count(torch.utils.data.Dataset):
                 idx = 0
             tokens = tokens[idx:idx+1] ### return the encoding for a selected example per video instance
         else:
+            if bounds is not None:
+                low_bound = bounds[0]//16
             tokens = tokens[0::4] # non overlapping segments
                 
         
@@ -91,7 +93,8 @@ class Rep_count(torch.utils.data.Dataset):
         segment_end = row['segment_end']        
         
         # --- Exemplar tokens loading ---
-        examplar_path = f"{self.exemplar_dir}/{self.split}/{video_name}"
+        # examplar_path = f"{self.exemplar_dir}/{self.split}/{video_name}"
+        examplar_path = f"{self.exemplar_dir}/{video_name}"
         example_rep = self.load_tokens(examplar_path,True) 
 
         # --- Density map loading ---
@@ -100,7 +103,8 @@ class Rep_count(torch.utils.data.Dataset):
         gt_density = gt_density[segment_start:segment_end]
         
         # --- Video tokens loading ---
-        video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
+        # video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
+        video_path = f"{self.tokens_dir}/{video_name}"
         vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end)) 
         
         if not self.select_rand_segment:

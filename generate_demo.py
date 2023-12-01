@@ -66,8 +66,8 @@ for count, freq in zip(unique_counts.astype(int), freq):
                 print(f'Selected random segment has less than {64} frames -> dropping (segment stats shown below)')
                 print(f"count: {count} \n starts: {select_starts} \n ends: {select_ends} \n frames: {select_ends[-1]-select_starts[0]}")
                 continue
-            new_row['segment_start'] = select_starts[0] // 16 * 16
-            new_row['segment_end'] = new_row['segment_start'] + 512  ### getting segment start and end
+            new_row['segment_start'] = (select_starts[0] // 64) * 64
+            new_row['segment_end'] = (select_ends[-1] // 64 + 1) * 64  ### getting segment start and end
             for i in range(count):
                 new_row[f"L{2*i + 1}"] = select_starts[i]
                 new_row[f"L{2*i + 2}"] = select_ends[i]
