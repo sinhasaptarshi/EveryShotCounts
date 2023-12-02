@@ -75,15 +75,18 @@ def save_exemplar(dataloaders, model):
             np.savez('exemplar_tokens/{}/{}.npz'.format(split, video_name), enc_np)
 
 def save_tokens(dataloaders, model):
-    for split in ['train', 'val', 'test']:
+    for split in ['train']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
+            if video_name != 'stu8_4.mp4':
+                pass
+            print(video_name)
             C, T, H, W = video.shape
 
             clip_list = []
-            for j in range(0, T-64, 16): #### 75% overlap
+            for j in range(0, T-63, 16): #### 75% overlap
                 idx = np.linspace(j, j+64, 17)[:16].astype(int)
                 clips = video[:,idx]
                 clip_list.append(clips)
@@ -108,7 +111,7 @@ def main():
     args = parser.parse_args()
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
-    args.data_path = 'data/LLSP/'
+    args.data_path = '../LLSP/'
 
     
 
@@ -150,8 +153,8 @@ def main():
                 model.state_dict()[name].copy_(param)
     if args.save_video_encodings:
         save_tokens(dataloaders, model)
-    elif args.save_exemplar_encodings:
-        save_exemplar(dataloaders, model)
+    # elif args.save_exemplar_encodings:
+    #     save_exemplar(dataloaders, model)
 
     
 

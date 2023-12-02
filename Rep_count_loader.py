@@ -89,7 +89,7 @@ class Rep_count(torch.utils.data.Dataset):
     def load_density_map(self,path,count, bound):
         gt_density_map = np.load(path)['arr_0']#[0::4]
         # gt_density_map = gt_density_map/gt_density_map.sum() * count 
-        gt_density_map = gt_density_map[(bound[0]//64 * 64):(bound[1]//64 * 64)]
+        gt_density_map = gt_density_map[(bound[0]//64 * 64):(bound[1]//64  * 64)]
         # return gt_density_map
         return  gt_density_map##scale by count to make the sum consistent
       
@@ -115,7 +115,7 @@ class Rep_count(torch.utils.data.Dataset):
         # --- Video tokens loading ---
         # video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
         video_path = f"{self.tokens_dir}/{video_name}"
-        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end)) 
+        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end))
         
         if not self.select_rand_segment:
             vid_tokens = vid_tokens

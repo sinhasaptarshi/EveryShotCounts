@@ -324,7 +324,7 @@ class SupervisedMAE(nn.Module):
             nn.Conv3d(decoder_embed_dim, 256, kernel_size=3, stride=1, padding=1),
             nn.GroupNorm(8, 256),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d((1,2,2))
+            # nn.MaxPool3d((1,2,2))
         )
         self.decode_head1 = nn.Sequential(
             nn.Conv3d(256, 256, kernel_size=3, stride=1, padding=1),
@@ -547,10 +547,10 @@ class SupervisedMAE(nn.Module):
         x = self.decoder_embed(latent)
         # x = x + self.decoder_pos_embed
         x = x + self.sincos_pos_embed(x.shape[1], x.shape[2]).to(x.device)
-
         yi = self.decoder_embed(yi)
         # print(yi.shape)
-        yi = yi.mean(2).squeeze(1)
+        yi = yi.mean(1).squeeze(1)
+        
         # print(yi.shape)
 
         # print(x.shape)
@@ -569,19 +569,24 @@ class SupervisedMAE(nn.Module):
         for blk in self.decoder_blocks:
             x = blk(x, y)  ### feature interaction model
         x = self.decoder_norm(x)
-
+        # print(x.shape)
         n, thw, c = x.shape
         
-        t = self.patch_dims[0]
-
-        h = w = int(math.sqrt(thw/t))
+        # t = self.patch_dims[0]
+        
+        # h = w = int(math.sqrt(thw/t))
+        h = w = 7
+        t = int(thw / (h*w))
         x = x.transpose(1, 2).reshape(n, c, t, h, w)
         # print(x.shape)
         x = self.decode_head0(x)  
+        x = F.interpolate(x, scale_factor=(4,1,1), mode='trilinear')
         x = self.decode_head1(x)
+        x = F.upsample(x, scale_factor=(2,1,1), mode='trilinear')
         x = self.decode_head2(x)  ### (B, 1, 8, 1, 1)
+        print(x.shape)
         x = x.squeeze(-1).squeeze(-1)
-        x = self.temporal_map(x)
+        # x = self.temporal_map(x)
 
         # print(x.shape)
         # pred = self.forward_decoder(latent, boxes, shot_num)  # [N, 384, 384]

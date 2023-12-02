@@ -14,7 +14,7 @@ import torch.optim as optim
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=8, type=int,
+    parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=40, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -73,7 +73,7 @@ def get_args_parser():
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -142,7 +142,7 @@ def main():
         dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,
                                                            batch_size=args.batch_size,
                                                            num_workers=args.num_workers,
-                                                           shuffle=True,
+                                                           shuffle=False,
                                                            pin_memory=False,
                                                            drop_last=False,
                                                            collate_fn=dataset_train.collate_fn),
@@ -217,15 +217,16 @@ def main():
                         elif phase == 'val':
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
-                            data = item[0].cuda() # B x (THW) x C
-                            example = item[1].cuda() # B x (THW) x C
-                            density_map = item[2].cuda()
+                            data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                            print(data.shape)
+                            example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                            density_map = item[2].cuda().type(torch.cuda.FloatTensor)
+                            print(density_map.shape)
                             actual_counts = item[3].cuda() # B x 1
-                            
+
             
                             optimizer.zero_grad()
                             y = model(data, example)
-                            
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             if phase == 'val':
                                 ground_truth.append(actual_counts.detach().cpu().numpy())
@@ -234,15 +235,16 @@ def main():
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
                             loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
+                            print(y.shape)
+                            loss1 = lossMSE(y, density_map) 
                             
-                            loss1 = lossMSE(y, item[2].cuda()) 
-                            
-                            if args.use_mae:
-                                loss = loss1 + loss3
-                                loss2 = 0 # Set to 0 for clearer logging
-                            else:
-                                loss = loss1 + loss2
-                                loss3 = 0 # Set to 0 for clearer logging
+                            # if args.use_mae:
+                            #     loss = loss1 + loss3
+                            #     loss2 = 0 # Set to 0 for clearer logging
+                            # else:
+                            #     loss = loss1 + loss2
+                            #     loss3 = 0 # Set to 0 for clearer logging
+                            loss = loss1
                             if phase=='train':
                                 scaler.scale(loss).backward()
                                 scaler.step(optimizer)
