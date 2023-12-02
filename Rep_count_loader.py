@@ -48,7 +48,7 @@ class Rep_count(torch.utils.data.Dataset):
     
     
         
-    def load_tokens(self,path,is_exemplar,bounds=None):
+    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=20):
         tokens = np.load(path)['arr_0'] # Load in format C x t x h x w
             
         if is_exemplar:
@@ -68,7 +68,7 @@ class Rep_count(torch.utils.data.Dataset):
             
             # print(tokens.shape[0])
             tokens = tokens[0::4] # non overlapping segments
-            tokens = tokens[low_bound:up_bound] ## non overlapping segments
+            tokens = tokens[low_bound:min(up_bound, low_bound+lim_constraint)] ## non overlapping segments
                 
         
         tokens = torch.from_numpy(tokens)
@@ -86,10 +86,12 @@ class Rep_count(torch.utils.data.Dataset):
         return tokens
 
 
-    def load_density_map(self,path,count, bound):
+    def load_density_map(self,path,count, bound, lim_constraint=20):
         gt_density_map = np.load(path)['arr_0']#[0::4]
+        low = bound[0] // 64
+        up = bound[1] //64
         # gt_density_map = gt_density_map/gt_density_map.sum() * count 
-        gt_density_map = gt_density_map[(bound[0]//64 * 64):(bound[1]//64  * 64)]
+        gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)]
         # return gt_density_map
         return  gt_density_map##scale by count to make the sum consistent
       
@@ -109,13 +111,13 @@ class Rep_count(torch.utils.data.Dataset):
 
         # --- Density map loading ---
         density_map_path = f"{self.density_maps_dir}/{video_name}"
-        gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end))  
+        gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end), lim_constraint=20)  
         # gt_density = gt_density[segment_start:(segment_end//64 * 64)]
         
         # --- Video tokens loading ---
         # video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
         video_path = f"{self.tokens_dir}/{video_name}"
-        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end))
+        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end), lim_constraint=20) ###lim_constraint for memory issues
         
         if not self.select_rand_segment:
             vid_tokens = vid_tokens

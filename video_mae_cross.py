@@ -584,7 +584,6 @@ class SupervisedMAE(nn.Module):
         x = self.decode_head1(x)
         x = F.upsample(x, scale_factor=(2,1,1), mode='trilinear')
         x = self.decode_head2(x)  ### (B, 1, 8, 1, 1)
-        print(x.shape)
         x = x.squeeze(-1).squeeze(-1)
         # x = self.temporal_map(x)
 

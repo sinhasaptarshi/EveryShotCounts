@@ -75,13 +75,13 @@ def save_exemplar(dataloaders, model):
             np.savez('exemplar_tokens/{}/{}.npz'.format(split, video_name), enc_np)
 
 def save_tokens(dataloaders, model):
-    for split in ['train']:
+    for split in ['test', 'val']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
-            if video_name != 'stu8_4.mp4':
-                pass
+            # if video_name != 'stu8_4.mp4':
+            #     pass
             print(video_name)
             C, T, H, W = video.shape
 

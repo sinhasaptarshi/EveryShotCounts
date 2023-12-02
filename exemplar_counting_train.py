@@ -218,10 +218,8 @@ def main():
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
                             data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
-                            print(data.shape)
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             density_map = item[2].cuda().type(torch.cuda.FloatTensor)
-                            print(density_map.shape)
                             actual_counts = item[3].cuda() # B x 1
 
             
@@ -235,15 +233,14 @@ def main():
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
                             loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
-                            print(y.shape)
                             loss1 = lossMSE(y, density_map) 
                             
-                            # if args.use_mae:
-                            #     loss = loss1 + loss3
-                            #     loss2 = 0 # Set to 0 for clearer logging
-                            # else:
-                            #     loss = loss1 + loss2
-                            #     loss3 = 0 # Set to 0 for clearer logging
+                            if args.use_mae:
+                                loss = loss1 + loss3
+                                loss2 = 0 # Set to 0 for clearer logging
+                            else:
+                                loss = loss1 + loss2
+                                loss3 = 0 # Set to 0 for clearer logging
                             loss = loss1
                             if phase=='train':
                                 scaler.scale(loss).backward()
