@@ -221,11 +221,12 @@ def main():
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             density_map = item[2].cuda().type(torch.cuda.FloatTensor)
                             actual_counts = item[3].cuda() # B x 1
-
+                            # print(actual_counts)
             
                             optimizer.zero_grad()
                             y = model(data, example)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
+                            # print(predict_count)
                             if phase == 'val':
                                 ground_truth.append(actual_counts.detach().cpu().numpy())
                                 predictions.append(predict_count.detach().cpu().numpy())
@@ -253,7 +254,7 @@ def main():
                             total_loss1 += loss1.item() * data.shape[0]
                             total_loss2 += loss2 * data.shape[0]
                             total_loss3 += loss3.item() * data.shape[0]
-                            off_by_one += (torch.abs(actual_counts - predict_count) <=1).sum().item()
+                            off_by_one += (torch.abs(actual_counts/60 - predict_count/60) <=1).sum().item()
                             
                             if args.use_wandb:
                                 if phase == 'train':
