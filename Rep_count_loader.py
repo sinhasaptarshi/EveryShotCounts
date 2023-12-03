@@ -91,7 +91,7 @@ class Rep_count(torch.utils.data.Dataset):
         low = bound[0] // 64
         up = bound[1] //64
         # gt_density_map = gt_density_map/gt_density_map.sum() * count 
-        gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)]
+        gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)] * 60
         # return gt_density_map
         return  gt_density_map##scale by count to make the sum consistent
       

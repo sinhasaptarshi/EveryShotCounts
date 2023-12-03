@@ -14,7 +14,7 @@ import torch.optim as optim
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=1, type=int,
+    parser.add_argument('--batch_size', default=4, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=40, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -42,13 +42,13 @@ def get_args_parser():
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-4, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1e-5, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=2, metavar='N',
                         help='epochs to warmup LR')
-    parser.add_argument('--eval_freq', default=1, type=int)
+    parser.add_argument('--eval_freq', default=5, type=int)
 
     # Dataset parameters
     parser.add_argument('--precomputed', default=True, type=lambda x: (str(x).lower() == 'true'),
@@ -73,7 +73,7 @@ def get_args_parser():
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=2, type=int)
+    parser.add_argument('--num_workers', default=4, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -142,7 +142,7 @@ def main():
         dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,
                                                            batch_size=args.batch_size,
                                                            num_workers=args.num_workers,
-                                                           shuffle=False,
+                                                           shuffle=True,
                                                            pin_memory=False,
                                                            drop_last=False,
                                                            collate_fn=dataset_train.collate_fn),
