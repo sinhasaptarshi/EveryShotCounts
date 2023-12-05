@@ -21,4 +21,5 @@ data/
 checkpoints/
 examplar_tokens/
 gt_density_maps/
+gt_density_maps_recreated/
 exemplar_tokens/

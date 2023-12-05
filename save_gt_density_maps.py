@@ -18,17 +18,23 @@ for split in ['train', 'validtest']:
 
     
         gt_density = np.zeros(num_frames)
-
         for i in range(len(starts)):
             if starts[i] == ends[i]:
                 continue
-            segment = np.zeros(ends[i]-starts[i])
-            segment[len(segment)//2] = 1
-            segment = ndimage.gaussian_filter1d(segment, sigma=len(segment)/6, order = 0)
-            gt_density[starts[i]:(ends[i])] = segment
+            gt_density[int((starts[i] + ends[i] - 1)/2)] = 1
         
-        if not os.path.isdir(f"gt_density_maps"):
-            os.makedirs("gt_density_maps")
+        gt_density = ndimage.gaussian_filter1d(gt_density, sigma=1, order = 0)
+
+        # for i in range(len(starts)):
+        #     if starts[i] == ends[i]:
+        #         continue
+        #     segment = np.zeros(ends[i]-starts[i])
+        #     segment[len(segment)//2] = 1
+        #     segment = ndimage.gaussian_filter1d(segment, sigma=1, order = 0)
+        #     gt_density[starts[i]:(ends[i])] = segment
         
-        np.savez(f"gt_density_maps/{video_name}", gt_density)
+        if not os.path.isdir(f"gt_density_maps_recreated"):
+            os.makedirs("gt_density_maps_recreated")
+        
+        np.savez(f"gt_density_maps_recreated/{video_name}", gt_density)
 

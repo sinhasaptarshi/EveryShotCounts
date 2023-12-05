@@ -16,9 +16,15 @@ def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=4, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=40, type=int)
+    parser.add_argument('--epochs', default=60, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
+    parser.add_argument('--only_test', action='store_true',
+                        help='Only testing')
+    parser.add_argument('--trained_model', default='', type=str,
+                        help='path to a trained model')
+
+
 
     # Model parameters
     parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
@@ -42,7 +48,7 @@ def get_args_parser():
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-5, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
@@ -152,6 +158,13 @@ def main():
                                                          shuffle=False,
                                                          pin_memory=False,
                                                          drop_last=False,
+                                                         collate_fn=dataset_valid.collate_fn),
+                        'test':torch.utils.data.DataLoader(dataset_valid,
+                                                         batch_size=1,
+                                                         num_workers=args.num_workers,
+                                                         shuffle=False,
+                                                         pin_memory=False,
+                                                         drop_last=False,
                                                          collate_fn=dataset_valid.collate_fn)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
@@ -180,13 +193,58 @@ def main():
     # print(f"--- Loaded {loaded} params from statedict ---")
     
     optimizer = torch.optim.AdamW(param_groups, lr=args.blr, betas=(0.9, 0.95))
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
+    # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
     
     train_step = 0
     val_step = 0
-    
+    if args.only_test:
+        model.load_state_dict(torch.load(args.trained_model)['model_state_dict'])
+        model.eval()
+        print(f"Testing")
+        dataloader = dataloaders['test']
+        gt_counts = list()
+        predictions = list()
+        predict_mae = list()
+        clips = list()
+        bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
+        with tqdm(total=len(dataloader),bar_format=bformat,ascii='░▒█') as pbar:
+            for i, item in enumerate(dataloader):
+                data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                density_map = item[2].cuda().type(torch.cuda.FloatTensor)
+                actual_counts = item[3].cuda() # B x 1
+                with torch.no_grad():
+                    y = model(data, example)
+                predict_counts = torch.sum(y, dim=1).type(torch.FloatTensor).cuda()
+                predictions.extend(predict_counts.detach().cpu().numpy())
+                gt_counts.extend(actual_counts.detach().cpu().numpy())
+                mae = torch.div(torch.abs(predict_counts - actual_counts), actual_counts + 1e-1)
+                predict_mae.extend(mae.cpu().numpy())
+                clips.append(data.shape[1]//(8*7*7))
+                print(predict_mae)
+
+        predict_mae = np.array(predict_mae)
+        predictions = np.array(predictions)//60
+        gt_counts = np.array(gt_counts)//60
+        clips = np.array(clips)
+        min = clips.min()
+        max = clips.max()
+
+        print(gt_counts)
+        print(f'Overall MAE: {predict_mae.mean()}')
+        for counts in range(1,7):
+            print(f"MAE for count {counts} is {predict_mae[gt_counts <= counts].mean()}")
+        for duration in np.linspace(min, max, 10)[1:]:
+            print(f"MAE for duration less that {duration} is {predict_mae[clips <= duration].mean()}")
+
+        return
+
+
+
+
     for epoch in range(args.epochs):
         scheduler.step(epoch)
         print(f"Epoch: {epoch:02d}")
@@ -223,7 +281,7 @@ def main():
                             actual_counts = item[3].cuda() # B x 1
                             # print(actual_counts)
             
-                            optimizer.zero_grad()
+                            
                             y = model(data, example)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             # print(predict_count)
@@ -245,8 +303,10 @@ def main():
                             loss = loss1
                             if phase=='train':
                                 scaler.scale(loss).backward()
-                                scaler.step(optimizer)
-                                scaler.update()
+                                if (i + 1) % 10 == 0: ### accumulate gradient
+                                    scaler.step(optimizer)
+                                    scaler.update()
+                                    optimizer.zero_grad()
                             
                             epoch_loss = loss.item()
                             count += data.shape[0]
@@ -286,6 +346,7 @@ def main():
                             "train_loss1": total_loss1/float(count), 
                             "train_loss2": total_loss2/float(count), 
                             "train_loss3": total_loss3/float(count), 
+                            "train_obo": off_by_one/count,
                         })
                     
                     if phase == 'val':
@@ -296,8 +357,8 @@ def main():
                             "val_loss1": total_loss1/float(count), 
                             "val_loss2": total_loss2/float(count), 
                             "val_loss3": total_loss3/float(count), 
-                            "obo": off_by_one/count, 
-                            "mae": total_loss3/count, 
+                            "val_obo": off_by_one/count, 
+                            "val_mae": total_loss3/count, 
                         })
                         torch.save({
                             'epoch': epoch,
