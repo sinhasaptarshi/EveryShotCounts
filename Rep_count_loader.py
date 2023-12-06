@@ -19,7 +19,7 @@ class Rep_count(torch.utils.data.Dataset):
                  num_frames=512,
                  tokens_dir = "saved_tokens",
                  exemplar_dir = "exemplar_tokens",
-                 density_maps_dir = "gt_density_maps",
+                 density_maps_dir = "gt_density_maps_recreated",
                  select_rand_segment=True,
                  compact=False,
                  pool_tokens_factor=1.0):
@@ -91,7 +91,7 @@ class Rep_count(torch.utils.data.Dataset):
         low = bound[0] // 64
         up = bound[1] //64
         # gt_density_map = gt_density_map/gt_density_map.sum() * count 
-        gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)] * 60
+        gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)]  * 60  #multiply 60 if needed
         # return gt_density_map
         return  gt_density_map##scale by count to make the sum consistent
       
@@ -101,6 +101,11 @@ class Rep_count(torch.utils.data.Dataset):
         video_name = self.df.iloc[index]['name'].replace('.mp4', '.npz')
         row = self.df.iloc[index]
         
+        if self.split in ['val', 'test']:
+            lim_constraint = np.inf
+        else:
+            lim_constraint = 20
+
         segment_start = row['segment_start']
         segment_end = row['segment_end']        
         
@@ -111,13 +116,13 @@ class Rep_count(torch.utils.data.Dataset):
 
         # --- Density map loading ---
         density_map_path = f"{self.density_maps_dir}/{video_name}"
-        gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end), lim_constraint=20)  
+        gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end), lim_constraint=lim_constraint)  
         # gt_density = gt_density[segment_start:(segment_end//64 * 64)]
         
         # --- Video tokens loading ---
         # video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
         video_path = f"{self.tokens_dir}/{video_name}"
-        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end), lim_constraint=20) ###lim_constraint for memory issues
+        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end), lim_constraint=lim_constraint) ###lim_constraint for memory issues
         
         if not self.select_rand_segment:
             vid_tokens = vid_tokens

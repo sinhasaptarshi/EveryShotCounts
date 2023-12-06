@@ -11,12 +11,13 @@ import timm.optim.optim_factory as optim_factory
 import argparse
 import wandb
 import torch.optim as optim
+import math
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=4, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=60, type=int)
+    parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
@@ -46,13 +47,13 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--lr', type=float, default=None, metavar='LR',
-                        help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--init_lr', type=float, default=1e-8, metavar='LR',
+                        help='learning rate (initial lr)')
+    parser.add_argument('--peak_lr', type=float, default=1e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
-    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
+    parser.add_argument('--end_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
-    parser.add_argument('--warmup_epochs', type=int, default=2, metavar='N',
+    parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR')
     parser.add_argument('--eval_freq', default=5, type=int)
 
@@ -173,7 +174,7 @@ def main():
     #model = RepMem().cuda()
     
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
-    param_groups = optim_factory.add_weight_decay(model, 5e-2)
+    # param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
     
     # if args.pretrained_encoder:
@@ -192,11 +193,7 @@ def main():
     #             model.state_dict()[name].copy_(param)
     # print(f"--- Loaded {loaded} params from statedict ---")
     
-    optimizer = torch.optim.AdamW(param_groups, lr=args.blr, betas=(0.9, 0.95))
-    # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
-    lossMSE = nn.MSELoss().cuda()
-    lossSL1 = nn.SmoothL1Loss().cuda()
+    
     
     train_step = 0
     val_step = 0
@@ -242,11 +239,23 @@ def main():
 
         return
 
-
+     # param_groups = optim_factory.add_weight_decay(model, 5e-2)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, weight_decay=5e-2, betas=(0.9, 0.95))
+    # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
+    lossMSE = nn.MSELoss().cuda()
+    lossSL1 = nn.SmoothL1Loss().cuda()
 
 
     for epoch in range(args.epochs):
-        scheduler.step(epoch)
+        if epoch <= args.warmup_epochs:
+            lr = args.init_lr + ((args.peak_lr - args.init_lr) *  epoch / args.warmup_epochs)  ### linear warmup
+        else:
+            lr = args.end_lr + (args.peak_lr - args.end_lr) * (1 + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs))) / 2  ##cosine annealing
+        
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr   ##scheduling
+
         print(f"Epoch: {epoch:02d}")
         for phase in ['train', 'val']:
             if phase == 'val':
@@ -263,8 +272,10 @@ def main():
                 total_loss1 = 0
                 total_loss2 = 0
                 total_loss3 = 0
-                off_by_one = 0
+                off_by_zero = 0
+                mse = 0
                 count = 0
+                mae = 0
                 
                 bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
                 dataloader = dataloaders[phase]
@@ -294,16 +305,16 @@ def main():
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
                             loss1 = lossMSE(y, density_map) 
                             
-                            if args.use_mae:
-                                loss = loss1 + loss3
-                                loss2 = 0 # Set to 0 for clearer logging
-                            else:
-                                loss = loss1 + loss2
-                                loss3 = 0 # Set to 0 for clearer logging
+                            # if args.use_mae:
+                            #     loss = loss1 + loss3
+                            #     loss2 = 0 # Set to 0 for clearer logging
+                            # else:
+                            #     loss = loss1 + loss2
+                            #     loss3 = 0 # Set to 0 for clearer logging
                             loss = loss1
                             if phase=='train':
                                 scaler.scale(loss).backward()
-                                if (i + 1) % 10 == 0: ### accumulate gradient
+                                if (i + 1) % 5 == 0: ### accumulate gradient
                                     scaler.step(optimizer)
                                     scaler.update()
                                     optimizer.zero_grad()
@@ -314,7 +325,11 @@ def main():
                             total_loss1 += loss1.item() * data.shape[0]
                             total_loss2 += loss2 * data.shape[0]
                             total_loss3 += loss3.item() * data.shape[0]
-                            off_by_one += (torch.abs(actual_counts/60 - predict_count/60) <=1).sum().item()
+                            actual_counts = actual_counts / 60
+                            predict_count = predict_count / 60
+                            off_by_zero += (torch.abs(actual_counts.floor() - predict_count.floor()) ==0).sum().item()
+                            mse += ((actual_counts - predict_count)**2).sum().item()
+                            mae += torch.sum(torch.div(torch.abs(predict_count - actual_counts), (actual_counts) + 1e-1)).item()
                             
                             if args.use_wandb:
                                 if phase == 'train':
@@ -335,7 +350,7 @@ def main():
                                     })
                             
                             pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
-                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBO: {off_by_one/count:.2f}")
+                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBO: {off_by_zero/count:.2f}")
                             pbar.update()
                              
                 
@@ -346,7 +361,9 @@ def main():
                             "train_loss1": total_loss1/float(count), 
                             "train_loss2": total_loss2/float(count), 
                             "train_loss3": total_loss3/float(count), 
-                            "train_obo": off_by_one/count,
+                            "train_obz": off_by_zero/count,
+                            "train_rmse": np.sqrt(mse/count),
+                            "train_mae": mae/count
                         })
                     
                     if phase == 'val':
@@ -357,8 +374,9 @@ def main():
                             "val_loss1": total_loss1/float(count), 
                             "val_loss2": total_loss2/float(count), 
                             "val_loss3": total_loss3/float(count), 
-                            "val_obo": off_by_one/count, 
-                            "val_mae": total_loss3/count, 
+                            "val_obz": off_by_zero/count, 
+                            "val_mae": mae/count, 
+                            "val_rmse": np.sqrt(mse/count)
                         })
                         torch.save({
                             'epoch': epoch,
