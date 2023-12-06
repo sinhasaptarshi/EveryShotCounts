@@ -82,7 +82,6 @@ class Rep_count(torch.utils.data.Dataset):
         #     start = bounds[0] // 8 ## Sampling every 4 frames and MViT temporally downsample T=16 -> 8 
         #     end = bounds[1] // 8
         #     tokens = tokens[:,start:end,:,:]
-            
         return tokens
 
 
@@ -127,8 +126,7 @@ class Rep_count(torch.utils.data.Dataset):
         if not self.select_rand_segment:
             vid_tokens = vid_tokens
             gt_density = torch.from_numpy(gt_density)
-            
-            return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4] 
+            return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4], list(vid_tokens.shape[-3:]) 
         
         T = row['num_frames'] ### number of frames in the video
         if T <= self.num_frames:
@@ -138,6 +136,7 @@ class Rep_count(torch.utils.data.Dataset):
             end = start + self.num_frames  ## for taking 8 segments
 
         sampled_segments = vid_tokens[(start//64) : (end//64)]
+        thw = sampled_segments.shape()[-3:]
         sampled_segments = einops.rearrange(sampled_segments, 'C t h w -> (t h w) C')
         #n, c, t, h, w = sampled_segments.shape
         #sampled_segments = sampled_segments.permute(0, 2, 3, 4, 1).reshape(-1, c)
@@ -145,7 +144,7 @@ class Rep_count(torch.utils.data.Dataset):
         gt = gt_density[(start//4): (end//4)]
         # print(gt.sum())
 
-        return sampled_segments, example_rep, gt, gt.sum(), self.df.iloc[index]['name'][:-4]
+        return sampled_segments, example_rep, gt, gt.sum(), self.df.iloc[index]['name'][:-4], thw
         
 
     def __len__(self):
@@ -167,9 +166,10 @@ class Rep_count(torch.utils.data.Dataset):
         gt_density = einops.rearrange(pad_sequence([x[2] for x in batch]), 'S B -> B S')
         gt_density_sum =  torch.tensor([x[3] for x in batch], dtype=torch.float)
         names = [x[4] for x in batch]
+        thw = [x[5] for x in batch]
         
         # return padded video, exemplar, padded density map,
-        return vids, exemplars, gt_density, gt_density_sum, names
+        return vids, exemplars, gt_density, gt_density_sum, names, thw
 
 
 ## testing
