@@ -72,10 +72,10 @@ def save_exemplar(dataloaders, model):
             if not os.path.isdir(f'exemplar_tokens/{split}'):
                 os.makedirs(f'exemplar_tokens/{split}')
                 
-            np.savez('exemplar_tokens/{}/{}.npz'.format(split, video_name), enc_np)
+            np.savez('exemplar_tokens/{}.npz'.format(video_name), enc_np)
 
 def save_tokens(dataloaders, model):
-    for split in ['test', 'val']:
+    for split in ['train','test', 'val']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
@@ -103,7 +103,7 @@ def save_tokens(dataloaders, model):
             if not os.path.isdir(f'saved_tokens/{split}'):
                 os.makedirs(f'saved_tokens/{split}')
             
-            np.savez('saved_tokens/{}/{}.npz'.format(split, video_name), enc_np)
+            np.savez('saved_tokens/{}.npz'.format(video_name), enc_np)
 
 
 def main():
@@ -111,7 +111,7 @@ def main():
     args = parser.parse_args()
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
-    args.data_path = '../LLSP/'
+    args.data_path = 'data/LLSP'
 
     
 
@@ -153,8 +153,8 @@ def main():
                 model.state_dict()[name].copy_(param)
     if args.save_video_encodings:
         save_tokens(dataloaders, model)
-    # elif args.save_exemplar_encodings:
-    #     save_exemplar(dataloaders, model)
+    elif args.save_exemplar_encodings:
+        save_exemplar(dataloaders, model)
 
     
 

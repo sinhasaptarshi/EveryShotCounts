@@ -531,7 +531,7 @@ class SupervisedMAE(nn.Module):
 
     #     return x
 
-    def forward(self, vid, yi=None, boxes=None, shot_num=0):
+    def forward(self, vid, yi=None, thw=None, boxes=None, shot_num=0):
         # if boxes.nelement() > 0:
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
         y1 = []
@@ -544,6 +544,7 @@ class SupervisedMAE(nn.Module):
         else:
             latent = vid
             # print(_)
+        _,h,w = thw[0]
         x = self.decoder_embed(latent)
         # x = x + self.decoder_pos_embed
         x = x + self.sincos_pos_embed(x.shape[1], x.shape[2]).to(x.device)
@@ -575,7 +576,6 @@ class SupervisedMAE(nn.Module):
         # t = self.patch_dims[0]
         
         # h = w = int(math.sqrt(thw/t))
-        h = w = 7
         t = int(thw / (h*w))
         x = x.transpose(1, 2).reshape(n, c, t, h, w)
         # print(x.shape)

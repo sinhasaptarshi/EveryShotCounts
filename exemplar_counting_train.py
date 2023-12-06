@@ -18,7 +18,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=4, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=100, type=int)
-    parser.add_argument('--accum_iter', default=1, type=int,
+    parser.add_argument('--accum_iter', default=5, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
                         help='Only testing')
@@ -103,6 +103,8 @@ def get_args_parser():
     parser.add_argument("--wandb", default="counting", type=str)
     parser.add_argument("--team", default="repetition_counting", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
+    
+    parser.add_argument("--token_pool_ratio", default=0.5, type=float)
 
     return parser
 
@@ -133,7 +135,7 @@ def main():
                                   density_maps_dir = args.gt_dir,
                                   select_rand_segment=False, 
                                   compact=True, 
-                                  pool_tokens_factor=0.5)
+                                  pool_tokens_factor=args.token_pool_ratio)
         
         dataset_valid = Rep_count(split="valid",
                                   tokens_dir = args.tokens_dir,
@@ -141,7 +143,7 @@ def main():
                                   density_maps_dir = args.gt_dir,
                                   select_rand_segment=False, 
                                   compact=True, 
-                                  pool_tokens_factor=0.5)
+                                  pool_tokens_factor=args.token_pool_ratio)
     
         #dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
     
@@ -291,10 +293,12 @@ def main():
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             density_map = item[2].cuda().type(torch.cuda.FloatTensor)
                             actual_counts = item[3].cuda() # B x 1
+                            thw = item[5]
                             # print(actual_counts)
             
                             
-                            y = model(data, example)
+                            y = model(data, example, thw)
+                            #print(item[4],data.shape,y.shape,density_map.shape)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             # print(predict_count)
                             if phase == 'val':
@@ -315,7 +319,7 @@ def main():
                             loss = loss1
                             if phase=='train':
                                 scaler.scale(loss).backward()
-                                if (i + 1) % 5 == 0: ### accumulate gradient
+                                if (i + 1) % args.accum_iter == 0: ### accumulate gradient
                                     scaler.step(optimizer)
                                     scaler.update()
                                     optimizer.zero_grad()
