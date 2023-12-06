@@ -22,9 +22,11 @@ class Rep_count(torch.utils.data.Dataset):
                  density_maps_dir = "gt_density_maps_recreated",
                  select_rand_segment=True,
                  compact=False,
+                 lim_constraint=np.inf,
                  pool_tokens_factor=1.0):
         
         self.num_frames=num_frames
+        self.lim_constraint = lim_constraint
         self.tokens_dir = tokens_dir
         self.exemplar_dir = exemplar_dir
         self.density_maps_dir = density_maps_dir
@@ -103,7 +105,7 @@ class Rep_count(torch.utils.data.Dataset):
         if self.split in ['val', 'test']:
             lim_constraint = np.inf
         else:
-            lim_constraint = 20
+            lim_constraint = self.lim_constraint
 
         segment_start = row['segment_start']
         segment_end = row['segment_end']        

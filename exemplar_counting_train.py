@@ -12,6 +12,17 @@ import argparse
 import wandb
 import torch.optim as optim
 import math
+import random
+
+torch.manual_seed(0)
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -55,7 +66,7 @@ def get_args_parser():
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR')
-    parser.add_argument('--eval_freq', default=5, type=int)
+    parser.add_argument('--eval_freq', default=1, type=int)
 
     # Dataset parameters
     parser.add_argument('--precomputed', default=True, type=lambda x: (str(x).lower() == 'true'),
@@ -66,7 +77,7 @@ def get_args_parser():
                         help='ground truth density map directory')
     parser.add_argument('--exemplar_dir', default='exemplar_tokens', type=str,
                         help='ground truth density map directory')
-    parser.add_argument('--gt_dir', default='gt_density_maps', type=str,
+    parser.add_argument('--gt_dir', default='gt_density_maps_recreated', type=str,
                         help='ground truth density map directory')
     
     parser.add_argument('--device', default='cuda',
@@ -116,6 +127,8 @@ def main():
     parser = get_args_parser()
     args = parser.parse_args()
     args.opts = None
+    g = torch.Generator()
+    g.manual_seed(args.seed)
     if args.use_wandb:
         wandb_run = wandb.init(
                     config=args,
@@ -154,21 +167,27 @@ def main():
                                                            shuffle=True,
                                                            pin_memory=False,
                                                            drop_last=False,
-                                                           collate_fn=dataset_train.collate_fn),
+                                                           collate_fn=dataset_train.collate_fn,
+                                                           worker_init_fn=seed_worker,
+                                                           generator=g),
                        'val':torch.utils.data.DataLoader(dataset_valid,
                                                          batch_size=args.batch_size,
                                                          num_workers=args.num_workers,
                                                          shuffle=False,
                                                          pin_memory=False,
                                                          drop_last=False,
-                                                         collate_fn=dataset_valid.collate_fn),
+                                                         collate_fn=dataset_valid.collate_fn,
+                                                         worker_init_fn=seed_worker,
+                                                         generator=g),
                         'test':torch.utils.data.DataLoader(dataset_valid,
                                                          batch_size=1,
                                                          num_workers=args.num_workers,
                                                          shuffle=False,
                                                          pin_memory=False,
                                                          drop_last=False,
-                                                         collate_fn=dataset_valid.collate_fn)}
+                                                         collate_fn=dataset_valid.collate_fn,
+                                                         worker_init_fn=seed_worker,
+                                                         generator=g)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     
@@ -242,7 +261,7 @@ def main():
         return
 
      # param_groups = optim_factory.add_weight_decay(model, 5e-2)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, weight_decay=5e-2, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, weight_decay=args.weight_decay, betas=(0.9, 0.95))
     # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
     lossMSE = nn.MSELoss().cuda()
@@ -275,6 +294,7 @@ def main():
                 total_loss2 = 0
                 total_loss3 = 0
                 off_by_zero = 0
+                off_by_one = 0
                 mse = 0
                 count = 0
                 mae = 0
@@ -297,6 +317,7 @@ def main():
             
                             
                             y = model(data, example, thw)
+                            y = torch.nn.functional.relu(y)
                             #print(item[4],data.shape,y.shape,density_map.shape)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             # print(predict_count)
@@ -305,6 +326,8 @@ def main():
                                 predictions.append(predict_count.detach().cpu().numpy())
                             
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
+                            actual_counts /= 60
+                            predict_count /= 60
                             loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
                             loss1 = lossMSE(y, density_map) 
@@ -329,9 +352,8 @@ def main():
                             total_loss1 += loss1.item() * data.shape[0]
                             total_loss2 += loss2 * data.shape[0]
                             total_loss3 += loss3.item() * data.shape[0]
-                            actual_counts = actual_counts / 60
-                            predict_count = predict_count / 60
                             off_by_zero += (torch.abs(actual_counts.floor() - predict_count.floor()) ==0).sum().item()
+                            off_by_one += (torch.abs(actual_counts.floor() - predict_count.floor()) ==1).sum().item()
                             mse += ((actual_counts - predict_count)**2).sum().item()
                             mae += torch.sum(torch.div(torch.abs(predict_count - actual_counts), (actual_counts) + 1e-1)).item()
                             
@@ -342,7 +364,8 @@ def main():
                                         "train_loss_per_step": loss,
                                         "train_loss1_per_step": loss1,
                                         "train_loss2_per_step": loss2,
-                                        "train_loss3_per_step": loss3
+                                        "train_loss3_per_step": loss3,
+                                        "lr": lr
                                     })
                                 if phase == 'val':
                                     wandb.log({
@@ -354,7 +377,7 @@ def main():
                                     })
                             
                             pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
-                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBO: {off_by_zero/count:.2f}")
+                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f}")
                             pbar.update()
                              
                 
@@ -366,6 +389,7 @@ def main():
                             "train_loss2": total_loss2/float(count), 
                             "train_loss3": total_loss3/float(count), 
                             "train_obz": off_by_zero/count,
+                            "train_obo": off_by_one/count,
                             "train_rmse": np.sqrt(mse/count),
                             "train_mae": mae/count
                         })
@@ -379,6 +403,7 @@ def main():
                             "val_loss2": total_loss2/float(count), 
                             "val_loss3": total_loss3/float(count), 
                             "val_obz": off_by_zero/count, 
+                            "val_obo": off_by_one/count, 
                             "val_mae": mae/count, 
                             "val_rmse": np.sqrt(mse/count)
                         })
