@@ -273,6 +273,7 @@ def main():
                 total_loss2 = 0
                 total_loss3 = 0
                 off_by_zero = 0
+                off_by_one = 0
                 mse = 0
                 count = 0
                 mae = 0
@@ -328,6 +329,7 @@ def main():
                             actual_counts = actual_counts / 60
                             predict_count = predict_count / 60
                             off_by_zero += (torch.abs(actual_counts.floor() - predict_count.floor()) ==0).sum().item()
+                            off_by_one += (torch.abs(actual_counts.floor() - predict_count.floor()) <=0 ).sum().item()
                             mse += ((actual_counts - predict_count)**2).sum().item()
                             mae += torch.sum(torch.div(torch.abs(predict_count - actual_counts), (actual_counts) + 1e-1)).item()
                             
@@ -350,7 +352,7 @@ def main():
                                     })
                             
                             pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
-                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBO: {off_by_zero/count:.2f}")
+                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f}")
                             pbar.update()
                              
                 
@@ -362,6 +364,7 @@ def main():
                             "train_loss2": total_loss2/float(count), 
                             "train_loss3": total_loss3/float(count), 
                             "train_obz": off_by_zero/count,
+                            "train_obo": off_by_one/count,
                             "train_rmse": np.sqrt(mse/count),
                             "train_mae": mae/count
                         })
@@ -375,6 +378,7 @@ def main():
                             "val_loss2": total_loss2/float(count), 
                             "val_loss3": total_loss3/float(count), 
                             "val_obz": off_by_zero/count, 
+                            "val_obo": off_by_one/count,
                             "val_mae": mae/count, 
                             "val_rmse": np.sqrt(mse/count)
                         })
