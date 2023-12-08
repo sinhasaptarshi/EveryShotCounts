@@ -12,6 +12,17 @@ import argparse
 import wandb
 import torch.optim as optim
 import math
+import random
+
+torch.manual_seed(0)
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -68,7 +79,7 @@ def get_args_parser():
                         help='ground truth density map directory')
     parser.add_argument('--exemplar_dir', default='exemplar_tokens', type=str,
                         help='ground truth density map directory')
-    parser.add_argument('--gt_dir', default='gt_density_maps', type=str,
+    parser.add_argument('--gt_dir', default='gt_density_maps_recreated', type=str,
                         help='ground truth density map directory')
     
     parser.add_argument('--device', default='cuda',
@@ -118,6 +129,8 @@ def main():
     parser = get_args_parser()
     args = parser.parse_args()
     args.opts = None
+    g = torch.Generator()
+    g.manual_seed(args.seed)
     if args.use_wandb:
         wandb_run = wandb.init(
                     config=args,
@@ -156,21 +169,27 @@ def main():
                                                            shuffle=True,
                                                            pin_memory=False,
                                                            drop_last=False,
-                                                           collate_fn=dataset_train.collate_fn),
+                                                           collate_fn=dataset_train.collate_fn,
+                                                           worker_init_fn=seed_worker,
+                                                           generator=g),
                        'val':torch.utils.data.DataLoader(dataset_valid,
                                                          batch_size=args.batch_size,
                                                          num_workers=args.num_workers,
                                                          shuffle=False,
                                                          pin_memory=False,
                                                          drop_last=False,
-                                                         collate_fn=dataset_valid.collate_fn),
+                                                         collate_fn=dataset_valid.collate_fn,
+                                                         worker_init_fn=seed_worker,
+                                                         generator=g),
                         'test':torch.utils.data.DataLoader(dataset_valid,
                                                          batch_size=1,
                                                          num_workers=args.num_workers,
                                                          shuffle=False,
                                                          pin_memory=False,
                                                          drop_last=False,
-                                                         collate_fn=dataset_valid.collate_fn)}
+                                                         collate_fn=dataset_valid.collate_fn,
+                                                         worker_init_fn=seed_worker,
+                                                         generator=g)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     
@@ -307,6 +326,7 @@ def main():
             
                             
                             y = model(data, example, thw)
+                            y = torch.nn.functional.relu(y)
                             #print(item[4],data.shape,y.shape,density_map.shape)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             # print(predict_count)
@@ -315,6 +335,8 @@ def main():
                                 predictions.append(predict_count.detach().cpu().numpy())
                             
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
+                            actual_counts /= 60
+                            predict_count /= 60
                             loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
                             loss1 = lossMSE(y, density_map) 
@@ -353,7 +375,8 @@ def main():
                                         "train_loss_per_step": loss,
                                         "train_loss1_per_step": loss1,
                                         "train_loss2_per_step": loss2,
-                                        "train_loss3_per_step": loss3
+                                        "train_loss3_per_step": loss3,
+                                        "lr": lr
                                     })
                                 if phase == 'val':
                                     wandb.log({
