@@ -17,8 +17,8 @@ def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=4, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=100, type=int)
-    parser.add_argument('--accum_iter', default=5, type=int,
+    parser.add_argument('--epochs', default=200, type=int)
+    parser.add_argument('--accum_iter', default=8, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
                         help='Only testing')
@@ -47,15 +47,17 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--init_lr', type=float, default=1e-8, metavar='LR',
+    parser.add_argument('--init_lr', type=float, default=1e-7, metavar='LR',
                         help='learning rate (initial lr)')
-    parser.add_argument('--peak_lr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--peak_lr', type=float, default=8e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--end_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR')
+    parser.add_argument('--decay_milestones', type=list, default=[80, 160], help='milestones to decay for step decay function')
     parser.add_argument('--eval_freq', default=5, type=int)
+    parser.add_argument('--cosine_decay', default=True, type=bool)
 
     # Dataset parameters
     parser.add_argument('--precomputed', default=True, type=lambda x: (str(x).lower() == 'true'),
@@ -104,7 +106,7 @@ def get_args_parser():
     parser.add_argument("--team", default="repetition_counting", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
     
-    parser.add_argument("--token_pool_ratio", default=0.5, type=float)
+    parser.add_argument("--token_pool_ratio", default=0.3, type=float)
 
     return parser
 
@@ -241,8 +243,9 @@ def main():
 
         return
 
-     # param_groups = optim_factory.add_weight_decay(model, 5e-2)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, weight_decay=5e-2, betas=(0.9, 0.95))
+    param_groups = optim_factory.add_weight_decay(model, 5e-2)
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW(param_groups, lr=args.init_lr, betas=(0.9, 0.95))
     # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
     lossMSE = nn.MSELoss().cuda()
@@ -253,7 +256,13 @@ def main():
         if epoch <= args.warmup_epochs:
             lr = args.init_lr + ((args.peak_lr - args.init_lr) *  epoch / args.warmup_epochs)  ### linear warmup
         else:
-            lr = args.end_lr + (args.peak_lr - args.end_lr) * (1 + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs))) / 2  ##cosine annealing
+            if args.cosine_decay:
+                lr = args.end_lr + (args.peak_lr - args.end_lr) * (1 + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs))) / 2  ##cosine annealing
+            else:
+                if epoch in args.decay_milestones:
+                    lr = lr * 0.1
+        
+        print(lr)
         
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr   ##scheduling
@@ -332,8 +341,8 @@ def main():
                             total_loss3 += loss3.item() * data.shape[0]
                             actual_counts = actual_counts / 60
                             predict_count = predict_count / 60
-                            off_by_zero += (torch.abs(actual_counts.floor() - predict_count.floor()) ==0).sum().item()
-                            off_by_one += (torch.abs(actual_counts.floor() - predict_count.floor()) <=0 ).sum().item()
+                            off_by_zero += (torch.abs(actual_counts.round() - predict_count.round()) ==0).sum().item()  ## off by zero
+                            off_by_one += (torch.abs(actual_counts - predict_count) <=1 ).sum().item()   ## off by one
                             mse += ((actual_counts - predict_count)**2).sum().item()
                             mae += torch.sum(torch.div(torch.abs(predict_count - actual_counts), (actual_counts) + 1e-1)).item()
                             
@@ -362,7 +371,8 @@ def main():
                 
                 if args.use_wandb:
                     if phase == 'train':
-                        wandb.log({"epoch": epoch, 
+                        wandb.log({"epoch": epoch,
+                            "lr": lr,
                             "train_loss": total_loss_all/float(count), 
                             "train_loss1": total_loss1/float(count), 
                             "train_loss2": total_loss2/float(count), 

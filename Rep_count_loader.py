@@ -38,6 +38,7 @@ class Rep_count(torch.utils.data.Dataset):
         else:
             csv_path = f"datasets/repcount/validtest_with_fps.csv"
         self.df = pd.read_csv(csv_path)
+        self.df['density_map_sum'] = 0
         self.df = self.df[self.df['count'].notna()]
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # self.df = self.df[self.df['fps'] >= 10]
@@ -58,17 +59,20 @@ class Rep_count(torch.utils.data.Dataset):
             else:
                 idx = 0
             tokens = tokens[idx:idx+1] ### return the encoding for a selected example per video instance
+            tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
         else:
             if bounds is not None:
-                low_bound = bounds[0]//64
-                up_bound = bounds[1]//64
+                low_bound = bounds[0]//8
+                up_bound = bounds[1]//8 
             # else:
             #     low_bound = 0
             #     up_bound = None
             
             # print(tokens.shape[0])
             tokens = tokens[0::4] # non overlapping segments
-            tokens = tokens[low_bound:min(up_bound, low_bound+lim_constraint)] ## non overlapping segments
+            tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
+            tokens = tokens[:, low_bound:up_bound]
+            # tokens = tokens[low_bound:min(up_bound, low_bound+lim_constraint)] ## non overlapping segments
                 
         
         tokens = torch.from_numpy(tokens)
@@ -76,7 +80,7 @@ class Rep_count(torch.utils.data.Dataset):
             factor = math.ceil(tokens.shape[-1] * self.pool_tokens)
             tokens = torch.nn.functional.adaptive_avg_pool3d(tokens, (tokens.shape[-3], factor, factor))
             
-        tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
+        # tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
         
         # if bounds is not None:
         #     start = bounds[0] // 8 ## Sampling every 4 frames and MViT temporally downsample T=16 -> 8 
@@ -87,12 +91,15 @@ class Rep_count(torch.utils.data.Dataset):
 
     def load_density_map(self,path,count, bound, lim_constraint=20):
         gt_density_map = np.load(path)['arr_0']#[0::4]
-        low = bound[0] // 64
-        up = bound[1] //64
+        low = bound[0] // 8 * 8
+        up = (bound[1] // 8 ) * 8
         # gt_density_map = gt_density_map/gt_density_map.sum() * count 
-        gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)]  * 60  #multiply 60 if needed
+        # print(gt_density_map.shape)
+        # gt_density_map = gt_density_map[(low * 64):(min(up, low + lim_constraint)  * 64)] #multiply 60 if needed
+        gt_density_map = gt_density_map[low: up]
+        # gt_density_map = gt_density_map[bound[0]:bound[1]+1]
         # return gt_density_map
-        return  gt_density_map##scale by count to make the sum consistent
+        return  gt_density_map #* 60 ##scale by count to make the sum consistent
       
       
     
@@ -103,10 +110,13 @@ class Rep_count(torch.utils.data.Dataset):
         if self.split in ['val', 'test']:
             lim_constraint = np.inf
         else:
-            lim_constraint = 20
+            lim_constraint = np.inf
 
         segment_start = row['segment_start']
-        segment_end = row['segment_end']        
+        segment_end = row['segment_end']     
+        # 
+        # segment_start = 0
+        # segment_end = row['num_frames']   
         
         # --- Exemplar tokens loading ---
         # examplar_path = f"{self.exemplar_dir}/{self.split}/{video_name}"
@@ -123,9 +133,13 @@ class Rep_count(torch.utils.data.Dataset):
         video_path = f"{self.tokens_dir}/{video_name}"
         vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end), lim_constraint=lim_constraint) ###lim_constraint for memory issues
         
+        # self.df['density_map_sum'].iloc[index] = gt_density.sum()
+
         if not self.select_rand_segment:
             vid_tokens = vid_tokens
-            gt_density = torch.from_numpy(gt_density)
+            gt_density = torch.from_numpy(gt_density) 
+            if row['count'] > gt_density.sum():
+                print(row['count'],gt_density.sum(),self.df.iloc[index]['name'][:-4])
             return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4], list(vid_tokens.shape[-3:]) 
         
         T = row['num_frames'] ### number of frames in the video
@@ -180,12 +194,14 @@ if __name__=='__main__':
     device = torch.device("cpu")
     print(f'Device: {device}')
     dataloader = torch.utils.data.DataLoader(dat,
-                                             batch_size=8,
-                                             num_workers=10,
+                                             batch_size=1,
+                                             num_workers=1,
                                              shuffle=False,
                                              pin_memory=False,
                                              drop_last=True,
                                              collate_fn=dat.collate_fn)
+    
+    
     sum_clip_dur = []
     sum_tot_dur = []
     sum_clip_counts = []
@@ -193,11 +209,13 @@ if __name__=='__main__':
     
     density_maps_sum = {}
     counts = {}
+    density_map_sum = []
     
     fps = []
     
     for i, item in enumerate(tqdm(dataloader)):
         print(f"It. {i} \n vid tokens: {item[0].shape} \n exem tokens: {item[1].shape} \n density map: {item[2].shape}:{item[3]} \n \n")
+        density_map_sum.append(item[3][0].item())
         #if int(item[3].item())!=int(item[5].item()):
         #    print(item[3].item(),int(item[5].item()))
         #if int(item[3].item()) not in density_maps_sum.keys():
@@ -220,7 +238,9 @@ if __name__=='__main__':
         # print(i, item[1].shape)
         # print(i, item[2].shape)
         # print(item[2])
-    
+    # df = pd.read_csv('datasets/repcount/train_balanced_new.csv')
+    # df['density_map_sum'] = density_map_sum
+    # df.to_csv('datasets/repcount/train_balanced_new1.csv')
     #for i in range(7):
     #    if i in counts.keys() and i in density_maps_sum.keys():
     #        print(i,counts[i],density_maps_sum[i])

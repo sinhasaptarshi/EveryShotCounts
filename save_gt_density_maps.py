@@ -14,7 +14,7 @@ for split in ['train', 'validtest']:
         count = row['count']
         num_frames = row['num_frames']
         video_name = row['name'].replace('.mp4','.npz')
-        print(video_name)
+        # print(video_name)
 
     
         gt_density = np.zeros(num_frames)
@@ -35,6 +35,8 @@ for split in ['train', 'validtest']:
         
         if not os.path.isdir(f"gt_density_maps_recreated"):
             os.makedirs("gt_density_maps_recreated")
+        if gt_density.sum() != count:
+            print(video_name, count, gt_density.sum())
         
         np.savez(f"gt_density_maps_recreated/{video_name}", gt_density)
 

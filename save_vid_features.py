@@ -84,9 +84,12 @@ def save_tokens(dataloaders, model):
             #     pass
             print(video_name)
             C, T, H, W = video.shape
+            padding = torch.zeros([C, 64, H, W])
+            video = torch.cat([video, padding], 1)
 
             clip_list = []
-            for j in range(0, T-63, 16): #### 75% overlap
+            n_frames = T
+            for j in range(0, T, 16): #### 75% overlap
                 idx = np.linspace(j, j+64, 17)[:16].astype(int)
                 clips = video[:,idx]
                 clip_list.append(clips)
@@ -111,7 +114,7 @@ def main():
     args = parser.parse_args()
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
-    args.data_path = 'data/LLSP'
+    args.data_path = '/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP'
 
     
 
