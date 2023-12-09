@@ -101,7 +101,7 @@ class Rep_count(torch.utils.data.Dataset):
         gt_density_map = gt_density_map[low: up]
         # gt_density_map = gt_density_map[bound[0]:bound[1]+1]
         # return gt_density_map
-        return  gt_density_map #* 60 ##scale by count to make the sum consistent
+        return  gt_density_map * 60 ##scale by count to make the sum consistent
       
       
     
@@ -240,9 +240,9 @@ if __name__=='__main__':
         # print(i, item[1].shape)
         # print(i, item[2].shape)
         # print(item[2])
-    # df = pd.read_csv('datasets/repcount/train_balanced_new.csv')
-    # df['density_map_sum'] = density_map_sum
-    # df.to_csv('datasets/repcount/train_balanced_new1.csv')
+    df = pd.read_csv('datasets/repcount/train_balanced_new.csv')
+    df['density_map_sum'] = density_map_sum
+    df.to_csv('datasets/repcount/train_balanced_new1.csv')
     #for i in range(7):
     #    if i in counts.keys() and i in density_maps_sum.keys():
     #        print(i,counts[i],density_maps_sum[i])
