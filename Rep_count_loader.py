@@ -14,7 +14,7 @@ import einops
 
 class Rep_count(torch.utils.data.Dataset):
     def __init__(self,
-                 split="train",
+                 split="val",
                  add_noise= False,
                  num_frames=512,
                  tokens_dir = "saved_tokens",
@@ -56,7 +56,7 @@ class Rep_count(torch.utils.data.Dataset):
             
         if is_exemplar:
             N = tokens.shape[0]
-            if self.select_rand_segment:
+            if self.select_rand_segment or self.split == 'train':
                 idx = np.random.randint(N)
             else:
                 idx = 0
@@ -240,9 +240,9 @@ if __name__=='__main__':
         # print(i, item[1].shape)
         # print(i, item[2].shape)
         # print(item[2])
-    df = pd.read_csv('datasets/repcount/train_balanced_new.csv')
-    df['density_map_sum'] = density_map_sum
-    df.to_csv('datasets/repcount/train_balanced_new1.csv')
+    # df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
+    # df['density_map_sum'] = density_map_sum
+    # df.to_csv('datasets/repcount/validtest_with_fps_new1.csv')
     #for i in range(7):
     #    if i in counts.keys() and i in density_maps_sum.keys():
     #        print(i,counts[i],density_maps_sum[i])

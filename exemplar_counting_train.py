@@ -13,6 +13,9 @@ import wandb
 import torch.optim as optim
 import math
 import random
+from util.lr_sched import adjust_learning_rate
+import pandas as pd
+from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 torch.manual_seed(0)
 
@@ -58,16 +61,18 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
+    parser.add_argument('--lr', type=float, default=1e-6, metavar='LR',
+                        help='learning rate (peaklr)')
     parser.add_argument('--init_lr', type=float, default=1e-7, metavar='LR',
                         help='learning rate (initial lr)')
     parser.add_argument('--peak_lr', type=float, default=8e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
-    parser.add_argument('--end_lr', type=float, default=0., metavar='LR',
+    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR')
     parser.add_argument('--decay_milestones', type=list, default=[80, 160], help='milestones to decay for step decay function')
-    parser.add_argument('--eval_freq', default=5, type=int)
+    parser.add_argument('--eval_freq', default=2, type=int)
     parser.add_argument('--cosine_decay', default=True, type=bool)
 
     # Dataset parameters
@@ -192,6 +197,7 @@ def main():
                                                          generator=g)}
               
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
+    # scaler = NativeScaler()
     
     model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed).cuda()
     #model = RepMem().cuda()
@@ -229,6 +235,7 @@ def main():
         predictions = list()
         predict_mae = list()
         clips = list()
+        
         bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
         with tqdm(total=len(dataloader),bar_format=bformat,ascii='░▒█') as pbar:
             for i, item in enumerate(dataloader):
@@ -236,19 +243,27 @@ def main():
                 example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                 density_map = item[2].cuda().type(torch.cuda.FloatTensor)
                 actual_counts = item[3].cuda() # B x 1
+                video_name = item[4]
+                thw = item[5]
                 with torch.no_grad():
-                    y = model(data, example)
+                    y = model(data, example, thw)
+                    y = torch.nn.functional.relu(y)
+                print(y)
+                np.savez('predictions/'+video_name[0]+'.npz', y.cpu().numpy())
                 predict_counts = torch.sum(y, dim=1).type(torch.FloatTensor).cuda()
                 predictions.extend(predict_counts.detach().cpu().numpy())
                 gt_counts.extend(actual_counts.detach().cpu().numpy())
                 mae = torch.div(torch.abs(predict_counts - actual_counts), actual_counts + 1e-1)
                 predict_mae.extend(mae.cpu().numpy())
                 clips.append(data.shape[1]//(8*7*7))
-                print(predict_mae)
+                # print(predict_mae)
 
         predict_mae = np.array(predict_mae)
-        predictions = np.array(predictions)//60
-        gt_counts = np.array(gt_counts)//60
+        predictions = np.array(predictions)/60
+        gt_counts = np.array(gt_counts)/60
+        df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
+        df['predictions'] = predictions
+        df.to_csv('datasets/repcount/validtest_with_fps.csv')
         clips = np.array(clips)
         min = clips.min()
         max = clips.max()
@@ -264,7 +279,7 @@ def main():
 
     param_groups = optim_factory.add_weight_decay(model, 5e-2)
     # optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, betas=(0.9, 0.95))
-    optimizer = torch.optim.AdamW(param_groups, lr=args.init_lr, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
     lossMSE = nn.MSELoss().cuda()
@@ -272,19 +287,18 @@ def main():
 
 
     for epoch in range(args.epochs):
-        if epoch <= args.warmup_epochs:
-            lr = args.init_lr + ((args.peak_lr - args.init_lr) *  epoch / args.warmup_epochs)  ### linear warmup
-        else:
-            if args.cosine_decay:
-                lr = args.end_lr + (args.peak_lr - args.end_lr) * (1 + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs))) / 2  ##cosine annealing
-            else:
-                if epoch in args.decay_milestones:
-                    lr = lr * 0.1
+        # if epoch <= args.warmup_epochs:
+        #     lr = args.init_lr + ((args.peak_lr - args.init_lr) *  epoch / args.warmup_epochs)  ### linear warmup
+        # else:
+        #     if args.cosine_decay:
+        #         lr = args.end_lr + (args.peak_lr - args.end_lr) * (1 + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs))) / 2  ##cosine annealing
+        #     else:
+        #         if epoch in args.decay_milestones:
+        #             lr = lr * 0.1
         
-        print(lr)
+        # print(lr)
         
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr   ##scheduling
+        
 
         print(f"Epoch: {epoch:02d}")
         for phase in ['train', 'val']:
@@ -314,10 +328,14 @@ def main():
                     for i, item in enumerate(dataloader):
                         if phase == 'train':
                             train_step+=1
+                            if (i+1) % args.accum_iter == 0:
+                                lr = adjust_learning_rate(optimizer, (i + 1) / len(dataloader) + epoch, args)
+                                print(lr)
                         elif phase == 'val':
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
                             data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                            # print(data.shape)
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             density_map = item[2].cuda().type(torch.cuda.FloatTensor)
                             actual_counts = item[3].cuda() # B x 1
@@ -326,7 +344,19 @@ def main():
             
                             
                             y = model(data, example, thw)
-                            y = torch.nn.functional.relu(y)
+                            # y = torch.nn.functional.relu(y)
+                            if phase == 'train':
+                                mask = np.random.binomial(n=1, p=0.7, size=[1,density_map.shape[1]])
+                            else:
+                                mask = np.ones([1, density_map.shape[1]])
+                            masks = np.tile(mask, (density_map.shape[0], 1))
+                            
+                            
+                            masks = torch.from_numpy(masks).cuda()
+                            loss = (y - density_map) ** 2
+                            
+                            loss = (loss * masks / density_map.sum(1, keepdims=True)).sum() / density_map.shape[0]
+                            
                             #print(item[4],data.shape,y.shape,density_map.shape)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
                             # print(predict_count)
@@ -335,11 +365,12 @@ def main():
                                 predictions.append(predict_count.detach().cpu().numpy())
                             
                             loss2 = lossSL1(predict_count, actual_counts)  ###L1 loss between count and predicted count
-                            actual_counts /= 60
-                            predict_count /= 60
+                            # actual_counts /= 60
+                            # predict_count /= 60
                             loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
-                            loss1 = lossMSE(y, density_map) 
+                            # loss1 = lossMSE(y, density_map) 
+                            loss1 = loss
                             
                             # if args.use_mae:
                             #     loss = loss1 + loss3
@@ -347,8 +378,11 @@ def main():
                             # else:
                             #     loss = loss1 + loss2
                             #     loss3 = 0 # Set to 0 for clearer logging
-                            loss = loss1
+                            # loss = loss1
                             if phase=='train':
+                                loss /= args.accum_iter
+                                # scaler(loss, optimizer, parameters=model.parameters(), update_grad=(i + 1) % args.accum_iter == 0)
+
                                 scaler.scale(loss).backward()
                                 if (i + 1) % args.accum_iter == 0: ### accumulate gradient
                                     scaler.step(optimizer)
@@ -358,7 +392,7 @@ def main():
                             epoch_loss = loss.item()
                             count += data.shape[0]
                             total_loss_all += loss.item() * data.shape[0]
-                            total_loss1 += loss1.item() * data.shape[0]
+                            total_loss1 += loss.item() * data.shape[0]
                             total_loss2 += loss2 * data.shape[0]
                             total_loss3 += loss3.item() * data.shape[0]
                             actual_counts = actual_counts / 60
@@ -376,7 +410,7 @@ def main():
                                         "train_loss1_per_step": loss1,
                                         "train_loss2_per_step": loss2,
                                         "train_loss3_per_step": loss3,
-                                        "lr": lr
+                                        # "lr": lr
                                     })
                                 if phase == 'val':
                                     wandb.log({
@@ -388,7 +422,7 @@ def main():
                                     })
                             
                             pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
-                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{total_loss3/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f}")
+                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{mae/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f}")
                             pbar.update()
                              
                 
