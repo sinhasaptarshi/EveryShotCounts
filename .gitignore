@@ -26,3 +26,4 @@ exemplar_tokens/
 predictions/
 plots/
 */*.npz
+*.zip
