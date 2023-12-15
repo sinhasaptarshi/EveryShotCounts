@@ -14,4 +14,4 @@ source /jmain02/home/J2AD001/wwp01/shared/home/etc/profile
 conda activate repcount
 
 export WANDB_MODE=offline
-python exemplar_counting_train.py --num_gpus 4 --only_test --trained_model saved_models/checkpoint_epoch_00010.pyth
+python exemplar_counting_train.py --num_gpus 4 --only_test --trained_model saved_models/checkpoint_epoch_00190.pyth

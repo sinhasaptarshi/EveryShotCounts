@@ -29,10 +29,10 @@ def seed_worker(worker_id):
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=4, type=int,
+    parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
-    parser.add_argument('--accum_iter', default=8, type=int,
+    parser.add_argument('--accum_iter', default=32, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
                         help='Only testing')
@@ -59,11 +59,11 @@ def get_args_parser():
     parser.set_defaults(use_mae=True)
 
     # Optimizer parameters
-    parser.add_argument('--weight_decay', type=float, default=0.05,
+    parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--lr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--lr', type=float, default=8e-6, metavar='LR',
                         help='learning rate (peaklr)')
-    parser.add_argument('--init_lr', type=float, default=1e-7, metavar='LR',
+    parser.add_argument('--init_lr', type=float, default=8e-6, metavar='LR',
                         help='learning rate (initial lr)')
     parser.add_argument('--peak_lr', type=float, default=8e-6, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
@@ -234,6 +234,7 @@ def main():
         gt_counts = list()
         predictions = list()
         predict_mae = list()
+        predict_mse = list()
         clips = list()
         
         bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
@@ -247,9 +248,11 @@ def main():
                 thw = item[5]
                 with torch.no_grad():
                     y = model(data, example, thw)
-                    y = torch.nn.functional.relu(y)
-                print(y)
-                np.savez('predictions/'+video_name[0]+'.npz', y.cpu().numpy())
+                    # y = torch.nn.functional.relu(y)
+                # print(video_name[0])
+                mse = ((y - density_map)**2).sum(-1)
+                np.savez('predictions_smallsubset_noupsampling/'+video_name[0]+'.npz', y[0].cpu().numpy())
+                np.savez('gt_smallsubset_noupsampling/'+video_name[0]+'.npz', density_map[0].cpu().numpy())
                 predict_counts = torch.sum(y, dim=1).type(torch.FloatTensor).cuda()
                 predictions.extend(predict_counts.detach().cpu().numpy())
                 gt_counts.extend(actual_counts.detach().cpu().numpy())
@@ -259,8 +262,8 @@ def main():
                 # print(predict_mae)
 
         predict_mae = np.array(predict_mae)
-        predictions = np.array(predictions)/60
-        gt_counts = np.array(gt_counts)/60
+        predictions = np.array(predictions)
+        # gt_counts = np.array(gt_counts)/60
         df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
         df['predictions'] = predictions
         df.to_csv('datasets/repcount/validtest_with_fps.csv')
@@ -277,11 +280,12 @@ def main():
 
         return
 
-    param_groups = optim_factory.add_weight_decay(model, 5e-2)
+    param_groups = optim_factory.add_weight_decay(model, args.weight_decay)
     # optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, betas=(0.9, 0.95))
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
+    milestones = [i for i in range(0, args.epochs, 40)]
     # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[40, 50], gamma=0.1)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.8)
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
 
@@ -297,7 +301,7 @@ def main():
         #             lr = lr * 0.1
         
         # print(lr)
-        
+        scheduler.step()
         
 
         print(f"Epoch: {epoch:02d}")
@@ -328,9 +332,9 @@ def main():
                     for i, item in enumerate(dataloader):
                         if phase == 'train':
                             train_step+=1
-                            if (i+1) % args.accum_iter == 0:
-                                lr = adjust_learning_rate(optimizer, (i + 1) / len(dataloader) + epoch, args)
-                                print(lr)
+                            # if (i+1) % args.accum_iter == 0:
+                            #     lr = adjust_learning_rate(optimizer, (i + 1) / len(dataloader) + epoch, args)
+                            #     print(lr)
                         elif phase == 'val':
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
@@ -346,9 +350,10 @@ def main():
                             y = model(data, example, thw)
                             # y = torch.nn.functional.relu(y)
                             if phase == 'train':
-                                mask = np.random.binomial(n=1, p=0.7, size=[1,density_map.shape[1]])
+                                mask = np.random.binomial(n=1, p=1.0, size=[1,density_map.shape[1]])
                             else:
                                 mask = np.ones([1, density_map.shape[1]])
+                            
                             masks = np.tile(mask, (density_map.shape[0], 1))
                             
                             
@@ -395,31 +400,31 @@ def main():
                             total_loss1 += loss.item() * data.shape[0]
                             total_loss2 += loss2 * data.shape[0]
                             total_loss3 += loss3.item() * data.shape[0]
-                            actual_counts = actual_counts / 60
-                            predict_count = predict_count / 60
+                            # actual_counts = actual_counts / 60
+                            # predict_count = predict_count / 60
                             off_by_zero += (torch.abs(actual_counts.round() - predict_count.round()) ==0).sum().item()  ## off by zero
                             off_by_one += (torch.abs(actual_counts - predict_count) <=1 ).sum().item()   ## off by one
                             mse += ((actual_counts - predict_count)**2).sum().item()
                             mae += torch.sum(torch.div(torch.abs(predict_count - actual_counts), (actual_counts) + 1e-1)).item()
                             
-                            if args.use_wandb:
-                                if phase == 'train':
-                                    wandb_run.log({
-                                        "train_step": train_step,
-                                        "train_loss_per_step": loss,
-                                        "train_loss1_per_step": loss1,
-                                        "train_loss2_per_step": loss2,
-                                        "train_loss3_per_step": loss3,
-                                        # "lr": lr
-                                    })
-                                if phase == 'val':
-                                    wandb.log({
-                                        "val_step": val_step,
-                                        "val_loss_per_step": loss,
-                                        "val_loss1_per_step": loss1,
-                                        "val_loss2_per_step": loss2,
-                                        "val_loss3_per_step": loss3
-                                    })
+                            # if args.use_wandb:
+                            #     if phase == 'train':
+                            #         wandb_run.log({
+                            #             "train_step": train_step,
+                            #             "train_loss_per_step": loss,
+                            #             "train_loss1_per_step": loss1,
+                            #             "train_loss2_per_step": loss2,
+                            #             "train_loss3_per_step": loss3,
+                            #             # "lr": lr
+                            #         })
+                            #     if phase == 'val':
+                            #         wandb.log({
+                            #             "val_step": val_step,
+                            #             "val_loss_per_step": loss,
+                            #             "val_loss1_per_step": loss1,
+                            #             "val_loss2_per_step": loss2,
+                            #             "val_loss3_per_step": loss3
+                            #         })
                             
                             pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
                             pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{mae/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f}")
@@ -429,7 +434,7 @@ def main():
                 if args.use_wandb:
                     if phase == 'train':
                         wandb.log({"epoch": epoch,
-                            "lr": lr,
+                            # "lr": lr,
                             "train_loss": total_loss_all/float(count), 
                             "train_loss1": total_loss1/float(count), 
                             "train_loss2": total_loss2/float(count), 

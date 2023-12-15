@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import random
+from scipy import integrate
 
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -37,6 +38,7 @@ class Rep_count(torch.utils.data.Dataset):
         self.add_noise = add_noise # add noise to frames (augmentation)
         if self.split == 'train':
             csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
+            # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
         else:
             csv_path = f"datasets/repcount/validtest_with_fps.csv"
         self.df = pd.read_csv(csv_path)
@@ -49,6 +51,35 @@ class Rep_count(torch.utils.data.Dataset):
         self.df = self.df[self.df['count'] > 0] # remove no reps
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
     
+
+    def PDF(self, x, u, sig):
+        # f(x)
+        return np.exp(-(x - u) ** 2 / (2 * sig ** 2)) / (math.sqrt(2 * math.pi) * sig)
+
+# integral f(x)
+    def get_integrate(self, x_1, x_2, avg, sig):
+        y, err = integrate.quad(self.PDF, x_1, x_2, args=(avg, sig))
+        return y
+
+    def normalize_label(self, y_frame, y_length):
+    # y_length: total frames
+    # return: normalize_label  size:nparray(y_length,)
+        y_label = [0 for i in range(y_length)]  # 坐标轴长度，即帧数
+        for i in range(0, len(y_frame), 2):
+            x_a = y_frame[i]
+            x_b = y_frame[i + 1]
+            avg = (x_b + x_a) / 2
+            sig = (x_b - x_a) / 6
+            num = x_b - x_a + 1  # 帧数量 update 1104
+            if num != 1:
+                for j in range(num):
+                    x_1 = x_a - 0.5 + j
+                    x_2 = x_a + 0.5 + j
+                    y_ing = self.get_integrate(x_1, x_2, avg, sig)
+                    y_label[x_a + j] = y_ing
+            else:
+                y_label[x_a] = 1
+        return y_label
     
         
     def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=20):
@@ -90,6 +121,24 @@ class Rep_count(torch.utils.data.Dataset):
         #     tokens = tokens[:,start:end,:,:]
         return tokens
 
+    def preprocess(self, video_frame_length, time_points, num_frames):
+        """
+        process label(.csv) to density map label
+        Args:
+            video_frame_length: video total frame number, i.e 1024frames
+            time_points: label point example [1, 23, 23, 40,45,70,.....] or [0]
+            num_frames: 64
+        Returns: for example [0.1,0.8,0.1, .....]
+        """
+        new_crop = []
+        for i in range(len(time_points)):  # frame_length -> 64
+            item = min(math.ceil((float((time_points[i])) / float(video_frame_length)) * num_frames), num_frames - 1)
+            new_crop.append(item)
+        new_crop = np.sort(new_crop)
+        label = self.normalize_label(new_crop, num_frames)
+
+        return label
+
 
     def load_density_map(self,path,count, bound, lim_constraint=20):
         gt_density_map = np.load(path)['arr_0']#[0::4]
@@ -101,13 +150,14 @@ class Rep_count(torch.utils.data.Dataset):
         gt_density_map = gt_density_map[low: up]
         # gt_density_map = gt_density_map[bound[0]:bound[1]+1]
         # return gt_density_map
-        return  gt_density_map * 60 ##scale by count to make the sum consistent
+        return  gt_density_map ##scale by count to make the sum consistent
       
       
     
     def __getitem__(self, index):
         video_name = self.df.iloc[index]['name'].replace('.mp4', '.npz')
         row = self.df.iloc[index]
+        cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not math.isnan(row[key])]
         
         if self.split in ['val', 'test']:
             lim_constraint = np.inf
@@ -115,7 +165,8 @@ class Rep_count(torch.utils.data.Dataset):
             lim_constraint = np.inf
 
         segment_start = row['segment_start']
-        segment_end = row['segment_end']     
+        segment_end = row['segment_end']  
+        num_frames = row['num_frames']   
         # 
         # segment_start = 0
         # segment_end = row['num_frames']   
@@ -124,10 +175,17 @@ class Rep_count(torch.utils.data.Dataset):
         # examplar_path = f"{self.exemplar_dir}/{self.split}/{video_name}"
         examplar_path = f"{self.exemplar_dir}/{video_name}"
         example_rep = self.load_tokens(examplar_path,True) 
-
+        # --- Alternate density map loading ---
+        density_map = self.preprocess(num_frames, cycle, num_frames)
+        low = segment_start // 8 * 8
+        up = (segment_end // 8 ) * 8
+        density_map = np.array(density_map[low: up])
+        gt_counts = density_map.sum()
+        density_map = density_map[0::8]
+        gt_density = density_map / density_map.sum() * gt_counts
         # --- Density map loading ---
-        density_map_path = f"{self.density_maps_dir}/{video_name}"
-        gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end), lim_constraint=lim_constraint)  
+        # density_map_path = f"{self.density_maps_dir}/{video_name}"
+        # gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end), lim_constraint=lim_constraint)  
         # gt_density = gt_density[segment_start:(segment_end//64 * 64)]
         
         # --- Video tokens loading ---

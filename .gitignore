@@ -25,4 +25,4 @@ gt_density_maps_recreated/
 exemplar_tokens/
 predictions/
 plots/
-
+*/*.npz
