@@ -32,19 +32,20 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
-    parser.add_argument('--accum_iter', default=32, type=int,
+    parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
                         help='Only testing')
     parser.add_argument('--trained_model', default='', type=str,
                         help='path to a trained model')
+    parser.add_argument('--scale_counts', default=100, type=int, help='scaling the counts')
 
 
 
     # Model parameters
     parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--save_path', default='./saved_models', type=str, help="Path to save the model")
+    parser.add_argument('--save_path', default='./saved_models_fulldata', type=str, help="Path to save the model")
 
     parser.add_argument('--mask_ratio', default=0.5, type=float,
                         help='Masking ratio (percentage of removed patches).')
@@ -61,7 +62,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--lr', type=float, default=8e-6, metavar='LR',
+    parser.add_argument('--lr', type=float, default=5e-7, metavar='LR',
                         help='learning rate (peaklr)')
     parser.add_argument('--init_lr', type=float, default=8e-6, metavar='LR',
                         help='learning rate (initial lr)')
@@ -80,9 +81,9 @@ def get_args_parser():
                         help='flag to specify if precomputed tokens will be loaded')
     parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/', type=str,
                         help='dataset path')
-    parser.add_argument('--tokens_dir', default='saved_tokens', type=str,
+    parser.add_argument('--tokens_dir', default='saved_tokens_reencoded', type=str,
                         help='ground truth density map directory')
-    parser.add_argument('--exemplar_dir', default='exemplar_tokens', type=str,
+    parser.add_argument('--exemplar_dir', default='exemplar_tokens_reencoded', type=str,
                         help='ground truth density map directory')
     parser.add_argument('--gt_dir', default='gt_density_maps_recreated', type=str,
                         help='ground truth density map directory')
@@ -122,7 +123,7 @@ def get_args_parser():
     parser.add_argument("--team", default="repetition_counting", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
     
-    parser.add_argument("--token_pool_ratio", default=0.3, type=float)
+    parser.add_argument("--token_pool_ratio", default=0.4, type=float)
 
     return parser
 
@@ -201,8 +202,8 @@ def main():
     
     model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed).cuda()
     #model = RepMem().cuda()
-    
-    model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
+    if args.num_gpus > 1:
+        model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     # param_groups = optim_factory.add_weight_decay(model, 5e-2)
     
     
@@ -242,18 +243,18 @@ def main():
             for i, item in enumerate(dataloader):
                 data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                 example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
-                density_map = item[2].cuda().type(torch.cuda.FloatTensor)
+                density_map = item[2].cuda().type(torch.cuda.FloatTensor).half() * args.scale_counts
                 actual_counts = item[3].cuda() # B x 1
                 video_name = item[4]
                 thw = item[5]
                 with torch.no_grad():
-                    y = model(data, example, thw)
+                    y = model(data, example, thw, shot_num=1)
                     # y = torch.nn.functional.relu(y)
                 # print(video_name[0])
                 mse = ((y - density_map)**2).sum(-1)
                 np.savez('predictions_smallsubset_noupsampling/'+video_name[0]+'.npz', y[0].cpu().numpy())
                 np.savez('gt_smallsubset_noupsampling/'+video_name[0]+'.npz', density_map[0].cpu().numpy())
-                predict_counts = torch.sum(y, dim=1).type(torch.FloatTensor).cuda()
+                predict_counts = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts
                 predictions.extend(predict_counts.detach().cpu().numpy())
                 gt_counts.extend(actual_counts.detach().cpu().numpy())
                 mae = torch.div(torch.abs(predict_counts - actual_counts), actual_counts + 1e-1)
@@ -263,16 +264,21 @@ def main():
 
         predict_mae = np.array(predict_mae)
         predictions = np.array(predictions)
-        # gt_counts = np.array(gt_counts)/60
-        df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
-        df['predictions'] = predictions
-        df.to_csv('datasets/repcount/validtest_with_fps.csv')
+        gt_counts = np.array(gt_counts)
+        # df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
+        # df['predictions'] = predictions
+        # df.to_csv('datasets/repcount/validtest_with_fps.csv')
         clips = np.array(clips)
         min = clips.min()
         max = clips.max()
 
         print(gt_counts)
+        diff = np.abs(predictions - gt_counts)
+        diff_z = np.abs(predictions.round() - gt_counts.round())
         print(f'Overall MAE: {predict_mae.mean()}')
+        print(f'OBO: {(diff<=1).sum()/ len(diff)}')
+        print(f'OBZ: {(diff_z==0).sum()/ len(diff)}')
+        print(f'RMSE: {np.sqrt((diff**2).mean())}')
         for counts in range(1,7):
             print(f"MAE for count {counts} is {predict_mae[gt_counts <= counts].mean()}")
         for duration in np.linspace(min, max, 10)[1:]:
@@ -288,8 +294,9 @@ def main():
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.8)
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
+    best_rmse = np.inf
 
-
+    os.makedirs(args.save_path, exist_ok=True)
     for epoch in range(args.epochs):
         # if epoch <= args.warmup_epochs:
         #     lr = args.init_lr + ((args.peak_lr - args.init_lr) *  epoch / args.warmup_epochs)  ### linear warmup
@@ -341,16 +348,16 @@ def main():
                             data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             # print(data.shape)
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
-                            density_map = item[2].cuda().type(torch.cuda.FloatTensor)
+                            density_map = item[2].cuda().type(torch.cuda.FloatTensor).half() * args.scale_counts
                             actual_counts = item[3].cuda() # B x 1
                             thw = item[5]
                             # print(actual_counts)
             
                             
-                            y = model(data, example, thw)
+                            y = model(data, example, thw, shot_num=1)
                             # y = torch.nn.functional.relu(y)
                             if phase == 'train':
-                                mask = np.random.binomial(n=1, p=1.0, size=[1,density_map.shape[1]])
+                                mask = np.random.binomial(n=1, p=0.8, size=[1,density_map.shape[1]])
                             else:
                                 mask = np.ones([1, density_map.shape[1]])
                             
@@ -360,10 +367,12 @@ def main():
                             masks = torch.from_numpy(masks).cuda()
                             loss = (y - density_map) ** 2
                             
-                            loss = (loss * masks / density_map.sum(1, keepdims=True)).sum() / density_map.shape[0]
+                            # loss = (loss * masks / density_map.sum(1, keepdims=True)).sum() / density_map.shape[0]
+                            loss = ((loss * masks) / density_map.shape[1]).sum() / density_map.shape[0]
+                            # loss = (loss * masks).sum() / density_map.shape[0]
                             
                             #print(item[4],data.shape,y.shape,density_map.shape)
-                            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() # sum density map
+                            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts # sum density map
                             # print(predict_count)
                             if phase == 'val':
                                 ground_truth.append(actual_counts.detach().cpu().numpy())
@@ -388,10 +397,12 @@ def main():
                                 loss /= args.accum_iter
                                 # scaler(loss, optimizer, parameters=model.parameters(), update_grad=(i + 1) % args.accum_iter == 0)
 
-                                scaler.scale(loss).backward()
+                                # scaler.scale(loss).backward()
+                                loss.backward()
                                 if (i + 1) % args.accum_iter == 0: ### accumulate gradient
-                                    scaler.step(optimizer)
-                                    scaler.update()
+                                    # scaler.step(optimizer)
+                                    # scaler.update()
+                                    optimizer.step()
                                     optimizer.zero_grad()
                             
                             epoch_loss = loss.item()
@@ -458,11 +469,19 @@ def main():
                             "val_mae": mae/count, 
                             "val_rmse": np.sqrt(mse/count)
                         })
+                        if np.sqrt(mse/count) < best_rmse:
+                            best_rmse = np.sqrt(mse/count)
+                            torch.save({
+                                'epoch': epoch,
+                                'model_state_dict': model.state_dict(),
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                }, os.path.join(args.save_path, 'best.pyth'))
                         torch.save({
-                            'epoch': epoch,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            }, os.path.join(args.save_path, 'checkpoint_epoch_{}.pyth'.format(str(epoch).zfill(5))))
+                                # 'epoch': epoch,
+                                'model_state_dict': model.state_dict(),
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                }, os.path.join(args.save_path, 'current.pyth'))
+    
     
     if args.use_wandb:                                   
         wandb_run.finish()

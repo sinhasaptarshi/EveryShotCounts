@@ -22,7 +22,7 @@ import timm
 assert "0.4.5" <= timm.__version__ <= "0.4.9"  # version check
 
 import util.misc as misc
-import CounTR.models_mae_cross as models_mae_cross
+import models_mae_cross as models_mae_cross
 
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = '12355'
@@ -76,7 +76,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/data/out/fim6_dir/checkpoint__finetuning_minMAE.pth',
+    parser.add_argument('--resume', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/CounTR/FSC147.pth',
                         help='resume from checkpoint')
     parser.add_argument('--external', default=False,
                         help='True if using external exemplars')
@@ -156,13 +156,17 @@ class TestData(Dataset):
 
     def __getitem__(self, idx):
         im_id = self.img[idx]
+        other_im_id = self.img[(idx + np.random.randint(100))%self.__len__()]
         anno = annotations[im_id]
-        bboxes = anno['box_examples_coordinates'] if self.box_bound < 0 else \
-            anno['box_examples_coordinates'][:self.box_bound]
+        anno1 = annotations[other_im_id]
+        bboxes = anno1['box_examples_coordinates'] if self.box_bound < 0 else \
+            anno1['box_examples_coordinates'][:self.box_bound]
         dots = np.array(anno['points'])
 
         image = Image.open('{}/{}'.format(im_dir, im_id))
         image.load()
+        image1 = Image.open('{}/{}'.format(im_dir, other_im_id))
+        image1.load()
         W, H = image.size
 
         new_H = 384
@@ -172,6 +176,16 @@ class TestData(Dataset):
         image = transforms.Resize((new_H, new_W))(image)
         Normalize = transforms.Compose([transforms.ToTensor()])
         image = Normalize(image)
+
+        W1, H1 = image1.size
+
+        new_H1 = 384
+        new_W1 = 16 * int((W1 / H1 * 384) / 16)
+        scale_factor_W1 = float(new_W1) / W1
+        scale_factor_H1 = float(new_H1) / H1
+        image1 = transforms.Resize((new_H1, new_W1))(image1)
+        Normalize = transforms.Compose([transforms.ToTensor()])
+        image1 = Normalize(image1)
 
         boxes = list()
         if self.external:
@@ -188,7 +202,7 @@ class TestData(Dataset):
             for box in rects:
                 box2 = [int(k) for k in box]
                 y1, x1, y2, x2 = box2[0], box2[1], box2[2], box2[3]
-                bbox = image[:, y1:y2 + 1, x1:x2 + 1]
+                bbox = image1[:, y1:y2 + 1, x1:x2 + 1]
                 bbox = transforms.Resize((64, 64))(bbox)
                 boxes.append(bbox.numpy())
 
@@ -257,7 +271,7 @@ def main(args):
 
     if args.distributed:
         # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
-        model = torch.nn.parallel.DataParallel(model, device_ids=[0,1,2,3])
+        model = torch.nn.parallel.DataParallel(model, device_ids=[0,1])
         model_without_ddp = model.module
 
     misc.load_model_FSC(args=args, model_without_ddp=model_without_ddp)

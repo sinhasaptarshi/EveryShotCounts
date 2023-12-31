@@ -25,7 +25,7 @@ import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import util.lr_sched as lr_sched
 from util.FSC147 import transform_train
-import CounTR.models_mae_cross as models_mae_cross
+import models_mae_cross 
 
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = '12355'
@@ -227,7 +227,7 @@ def main(args):
 
     if args.distributed:
         # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
-        model = torch.nn.parallel.DataParallel(model, device_ids=[0,1,2,3])
+        model = torch.nn.parallel.DataParallel(model, device_ids=[i for i in range(2)])
         model_without_ddp = model.module
 
     # following timm: set wd as 0 for bias and norm layers
@@ -242,6 +242,7 @@ def main(args):
     misc.load_model_FSC(args=args, model_without_ddp=model_without_ddp)
 
     print(f"Start training for {args.epochs} epochs")
+    wandb.watch(model, log='gradients', log_freq=50)
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -285,6 +286,7 @@ def main(args):
                 shot_num = random.randint(0, 3)
             else:
                 shot_num = random.randint(1, 3)
+            # shot_num = 1
 
             with torch.cuda.amp.autocast():
                 output = model(samples, boxes, shot_num)

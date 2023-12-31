@@ -32,7 +32,7 @@ import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import util.lr_sched as lr_sched
 from util.FSC147 import TransformTrain
-import models_mae_cross
+import CounTR.models_mae_cross as models_mae_cross
 
 
 def get_args_parser():

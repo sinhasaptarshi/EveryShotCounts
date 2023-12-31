@@ -7,6 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 import random
 from scipy import integrate
+from scipy import ndimage
 
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -15,11 +16,11 @@ import einops
 
 class Rep_count(torch.utils.data.Dataset):
     def __init__(self,
-                 split="val",
+                 split="train",
                  add_noise= False,
                  num_frames=512,
-                 tokens_dir = "saved_tokens",
-                 exemplar_dir = "exemplar_tokens",
+                 tokens_dir = "saved_tokens_reencoded",
+                 exemplar_dir = "exemplar_tokens_reencoded",
                  density_maps_dir = "gt_density_maps_recreated",
                  select_rand_segment=True,
                  compact=False,
@@ -39,6 +40,8 @@ class Rep_count(torch.utils.data.Dataset):
         if self.split == 'train':
             csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
             # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
+            # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
+            # csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         else:
             csv_path = f"datasets/repcount/validtest_with_fps.csv"
         self.df = pd.read_csv(csv_path)
@@ -49,6 +52,8 @@ class Rep_count(torch.utils.data.Dataset):
         self.df = self.df[self.df['num_frames'] > 64]
         self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
         self.df = self.df[self.df['count'] > 0] # remove no reps
+        # self.df = self.df.drop(self.df.loc[self.df['name']=='stu9_69.mp4'].index)
+        # self.df = self.df[self.df['num_frames'] < 1800]
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
     
 
@@ -82,21 +87,39 @@ class Rep_count(torch.utils.data.Dataset):
         return y_label
     
         
-    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=20):
-        tokens = np.load(path)['arr_0'] # Load in format C x t x h x w
+    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=20, id=None):
+        try:
+            tokens = np.load(path)['arr_0'] # Load in format C x t x h x w
+        except:
+            print(f'Could not load {path}')
+            
+
             
         if is_exemplar:
             N = tokens.shape[0]
             if self.select_rand_segment or self.split == 'train':
                 idx = np.random.randint(N)
+                # idx = 0
+                # shot_num = min(np.random.randint(1,3), N)
+                shot_num = 1
             else:
                 idx = 0
-            tokens = tokens[idx:idx+1] ### return the encoding for a selected example per video instance
+                # shot_num = min(1, N)
+                shot_num = 1
+                # if id is not None:
+                #     # idx = np.random.randint(N)
+                #     idx = 0
+                # else:
+                #     idx = 0
+
+            tokens = tokens[idx:idx+shot_num] ### return the encoding for a selected example per video instance
             tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
+            # tokens = np.random.rand(tokens.shape[0], tokens.shape[1], tokens.shape[2], tokens.shape[3])
         else:
             if bounds is not None:
                 low_bound = bounds[0]//8
-                up_bound = bounds[1]//8 
+                # up_bound = bounds[1]//8 
+                up_bound = math.ceil(bounds[1]/8)
             # else:
             #     low_bound = 0
             #     up_bound = None
@@ -109,7 +132,7 @@ class Rep_count(torch.utils.data.Dataset):
                 
         
         tokens = torch.from_numpy(tokens)
-        if self.pool_tokens < 1.0:
+        if self.pool_tokens < 1.0 and not is_exemplar:
             factor = math.ceil(tokens.shape[-1] * self.pool_tokens)
             tokens = torch.nn.functional.adaptive_avg_pool3d(tokens, (tokens.shape[-3], factor, factor))
             
@@ -170,19 +193,43 @@ class Rep_count(torch.utils.data.Dataset):
         # 
         # segment_start = 0
         # segment_end = row['num_frames']   
+        # --- Alternate density map loading ---
+        # density_map = self.preprocess(num_frames, cycle, num_frames)
+        frame_ids = np.arange(num_frames)
+        low = (segment_start // 8) * 8
+        up = math.ceil(segment_end / 8 ) * 8
+        # density_map = np.array(density_map[low: up])
+        select_frame_ids = frame_ids[low:up][0::8]
+        density_map_alt = np.zeros(len(select_frame_ids))
+        for i in range(0,len(cycle),2):
+            st, end = (cycle[i]//8) * 8, min(np.ceil(cycle[i+1]/8) * 8, select_frame_ids[-1])
+            start_id = np.where(select_frame_ids == st)[0][0]
+            end_id = np.where(select_frame_ids == end)[0][0]
+            mid = (start_id + end_id)//2
+            density_map_alt[mid] = 1
+        # print(density_map_alt.sum())
+        # gt_density = density_map_alt
+        gt_density = ndimage.gaussian_filter1d(density_map_alt, sigma=1, order=0)
+        
+
+
+        # gt_counts = density_map.sum()
+        # density_map = density_map[0::8]
+        # gt_density = density_map / density_map.sum() * gt_counts
+
         
         # --- Exemplar tokens loading ---
         # examplar_path = f"{self.exemplar_dir}/{self.split}/{video_name}"
-        examplar_path = f"{self.exemplar_dir}/{video_name}"
-        example_rep = self.load_tokens(examplar_path,True) 
-        # --- Alternate density map loading ---
-        density_map = self.preprocess(num_frames, cycle, num_frames)
-        low = segment_start // 8 * 8
-        up = (segment_end // 8 ) * 8
-        density_map = np.array(density_map[low: up])
-        gt_counts = density_map.sum()
-        density_map = density_map[0::8]
-        gt_density = density_map / density_map.sum() * gt_counts
+        starts = np.array(cycle[0::2])
+        ends = np.array(cycle[1::2])
+        durations = ends - starts
+        select_exemplar = durations.argmin()
+        # examplar_path = f"{self.exemplar_dir}/{video_name}"
+        examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '.npz')}"
+        example_rep = self.load_tokens(examplar_path,True, id=select_exemplar) 
+        # example_rep = self.load_tokens(examplar_path, True)
+        
+        
         # --- Density map loading ---
         # density_map_path = f"{self.density_maps_dir}/{video_name}"
         # gt_density = self.load_density_map(density_map_path,row['count'],(segment_start,segment_end), lim_constraint=lim_constraint)  
@@ -197,9 +244,9 @@ class Rep_count(torch.utils.data.Dataset):
 
         if not self.select_rand_segment:
             vid_tokens = vid_tokens
-            gt_density = torch.from_numpy(gt_density) 
-            if row['count'] > gt_density.sum():
-                print(row['count'],gt_density.sum(),self.df.iloc[index]['name'][:-4])
+            gt_density = torch.from_numpy(gt_density).half() 
+            # if row['count'] > gt_density.sum():
+            #     print(row['count'],gt_density.sum(),self.df.iloc[index]['name'][:-4])
             return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4], list(vid_tokens.shape[-3:]) 
         
         T = row['num_frames'] ### number of frames in the video
@@ -234,6 +281,8 @@ class Rep_count(torch.utils.data.Dataset):
             vids = einops.rearrange(vids, 'T B C H W -> B (T H W) C')
         else:
             vids = einops.rearrange(vids, 'T B C H W -> B C T H W')
+        # min_examplars = min([x[1].shape[1] for x in batch])
+        # exemplars = torch.stack([x[1][:, :min_examplars] for x in batch]).squeeze(1)
         exemplars = torch.stack([x[1] for x in batch]).squeeze(1)
         if self.compact:
             exemplars = einops.rearrange(exemplars,'B C T H W -> B (T H W) C')

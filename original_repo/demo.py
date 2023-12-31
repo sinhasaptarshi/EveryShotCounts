@@ -13,7 +13,7 @@ import timm
 assert "0.4.5" <= timm.__version__ <= "0.4.9"  # version check
 
 from util.misc import make_grid
-import models_mae_cross
+import CounTR.models_mae_cross as models_mae_cross
 
 device = torch.device('cuda')
 

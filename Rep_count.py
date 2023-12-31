@@ -123,6 +123,7 @@ class Rep_count(torch.utils.data.Dataset):
         # self.df = self.df[self.df['fps'] >= 10]
         # self.df = self.df[(self.df['name'] == 'stu9_71.mp4')]# or (self.df['name'] =='stu9_7.mp4')]
         self.df = self.df[self.df['num_frames'] > 64]
+        self.df = self.df[self.df['name'] == 'stu8_5.mp4']
         self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
         self.df = self.df[self.df['count'] > 0] # remove no reps
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )

@@ -22,7 +22,7 @@ import timm
 assert "0.4.5" <= timm.__version__ <= "0.4.9"  # version check
 
 import util.misc as misc
-import models_mae_cross
+import CounTR.models_mae_cross as models_mae_cross
 
 
 def get_args_parser():

@@ -5,6 +5,7 @@ import random
 from slowfast.models.attention import MultiScaleBlock
 
 import numpy as np
+import einops
 
 import torch
 import torch.nn as nn
@@ -17,6 +18,8 @@ from models_crossvit import CrossAttentionBlock
 
 from util.pos_embed import get_2d_sincos_pos_embed
 import logging
+from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+
 
 
 
@@ -153,7 +156,7 @@ class SupervisedMAE(nn.Module):
         self.W = cfg.DATA.TRAIN_CROP_SIZE // self.patch_stride[2]
 
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim), requires_grad=False)  # fixed sin-cos embedding
+        # self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
         if not self.use_precomputed:
             self.blocks = nn.ModuleList([
@@ -256,24 +259,29 @@ class SupervisedMAE(nn.Module):
 
         # --------------------------------------------------------------------------
         # MAE decoder specifics
+        print('Embed Dim', embed_dim)
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
-
+        # decoder_embed_dim = embed_dim  ## remove if using decode_embed
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
-
+        self.decoder_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, 6).astype(np.float32)), requires_grad=False)
+        self.example_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, 14).astype(np.float32)), requires_grad=False)
+        # self.decoder_spatial_pos_embed = nn.Parameter(torch.zeros(1, 36, decoder_embed_dim), requires_grad=True)
+        trunc_normal_(self.decoder_spatial_pos_embed, std=.02)
         self.shot_token = nn.Parameter(torch.zeros(512))
 
         # Exemplar encoder with CNN
         # self.decoder_proj1 = nn.Sequential(
-        #     nn.Conv3d(768, 512, kernel_size=3, stride=1, padding=1),
-        #     nn.InstanceNorm3d(64),
-        #     nn.ReLU(inplace=True),
-        #     nn.MaxPool3d((1,2,2)) #[3,64,64]->[64,32,32]
-        # )
-        # self.decoder_proj2 = nn.Sequential(
-        #     nn.Conv3d(64, 128, kernel_size=3, stride=1, padding=1),
+        #     nn.Conv3d(512, 128, kernel_size=3, stride=1, padding=1),
         #     nn.InstanceNorm3d(128),
         #     nn.ReLU(inplace=True),
-        #     nn.MaxPool3d((1, 2, 2)) #[64,32,32]->[128,16,16]
+        #     nn.MaxPool3d((2,2,2)) #[3,64,64]->[64,32,32]
+        # )
+        # self.decoder_proj2 = nn.Sequential(
+        #     nn.Conv3d(128, 512, kernel_size=3, stride=1, padding=1),
+        #     nn.InstanceNorm3d(512),
+        #     nn.ReLU(inplace=True),
+        #     nn.AdaptiveAvgPool3d((1, 1, 1)),
+        #     # nn.MaxPool3d((1, 2, 2)) #[64,32,32]->[128,16,16]
         # )
         # self.decoder_proj3 = nn.Sequential(
         #     nn.Conv3d(128, 256, kernel_size=3, stride=1, padding=1),
@@ -289,9 +297,9 @@ class SupervisedMAE(nn.Module):
         #     # [256,8,8]->[512,1,1]
         # )
 
-
+        
         self.decoder_blocks = nn.ModuleList([
-            CrossAttentionBlock(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+            CrossAttentionBlock(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer, drop_path=0)
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
@@ -337,7 +345,8 @@ class SupervisedMAE(nn.Module):
             nn.GroupNorm(8, 256),
             nn.ReLU(inplace=True),
             nn.MaxPool3d((1,2,2)),
-            nn.Conv3d(256, 1, kernel_size=1, stride=1)
+            nn.Conv3d(256, 1, kernel_size=1, stride=1),
+            nn.AdaptiveAvgPool2d((1,1))
         )  
         self.temporal_map = nn.Linear(self.patch_dims[0], cfg.DATA.NUM_FRAMES)
 
@@ -458,6 +467,7 @@ class SupervisedMAE(nn.Module):
 
         if self.use_abs_pos:
             if self.sep_pos_embed:
+                # print('Doing sep embedding')
                 pos_embed = self.pos_embed_spatial.repeat(
                     1, self.patch_dims[0], 1
                 ) + torch.repeat_interleave(
@@ -544,17 +554,59 @@ class SupervisedMAE(nn.Module):
         else:
             latent = vid
             # print(_)
-        _,h,w = thw[0]
+        t,h,w = thw[0]
         x = self.decoder_embed(latent)
+        # x = latent
         # x = x + self.decoder_pos_embed
-        x = x + self.sincos_pos_embed(x.shape[1], x.shape[2]).to(x.device)
-        yi = self.decoder_embed(yi)
-        # print(yi.shape)
-        yi = yi.mean(1).squeeze(1)
-        
-        # print(yi.shape)
+        # x = x.reshape(x.shape[0], -1, h, w, x.shape[-1])
+        decoder_pos_embed_temporal = self.sincos_pos_embed(t, x.shape[2]).to(x.device)
+        example_pos_embed_temporal = self.sincos_pos_embed(8, x.shape[2]).to(x.device)
+        pos_embed = self.decoder_spatial_pos_embed.repeat(
+                    1, t, 1
+                ) + torch.repeat_interleave(
+                    decoder_pos_embed_temporal,
+                    h*w,
+                    dim=1,
+                )
+        example_pos_embed = self.example_spatial_pos_embed.repeat(
+                    1, 8, 1
+                ) + torch.repeat_interleave(
+                    example_pos_embed_temporal,
+                    14*14,
+                    dim=1,
+                )
 
-        # print(x.shape)
+        # x = x + self.sincos_pos_embed(x.shape[1], x.shape[2]).to(x.device)
+        x = x + pos_embed
+        
+        # yi = yi + self.sincos_pos_embed(yi.shape[1], yi.shape[2]).to(x.device)
+        # yi = yi + example_pos_embed
+        # print(shot_num)
+        if shot_num > 0:
+            yi = self.decoder_embed(yi)
+            N,_,C = yi.shape
+            # yi = yi.reshape(-1, int(yi.shape[-2]/(h*w)), h, w, yi.shape[-1])
+            
+            # yi = yi.permute(0,2,1)
+            # print(yi.shape)
+            # yi = yi.reshape(-1, yi.shape[-2],int(yi.shape[-1]/(h*w)), h, w)
+            # for t_idx in range(yi.shape[1]//8):
+            #     y_temp = yi[:, 8*t_idx : 8*(t_idx+1)]
+            #     y_temp = einops.rearrange(y_temp, 'B T H W C -> B C T H W')
+            #     y_temp = self.decoder_proj1(y_temp)
+            #     y_temp = self.decoder_proj2(y_temp)
+            #     y_temp = y_temp.squeeze(-1).squeeze(-1).squeeze(-1)
+            #     # print(y_temp.shape)
+            #     y1.append(y_temp.unsqueeze(0)) 
+            # y = torch.cat(y1,dim=0).to(x.device)
+            # print(y.shape)
+            y = yi #+ example_pos_embed
+            # print(y.shape)
+        else:
+            y = self.shot_token.repeat(x.shape[0],1).unsqueeze(0).to(x.device)
+            # print(y.shape)
+        
+        # y = y.transpose(0,1)
         # yi = self.decoder_proj1(yi)
         # yi = self.decoder_proj2(yi)
         # yi = self.decoder_proj3(yi)
@@ -563,10 +615,16 @@ class SupervisedMAE(nn.Module):
 
         # N, C, _, _, _ = yi.shape
         # y1.append(yi.squeeze(-1).squeeze(-1).squeeze(-1)) 
-        N, C = yi.shape
-        y1.append(yi)
-        y = torch.cat(y1,dim=0).reshape(1,N,C).to(x.device)
-        y = y.transpose(0,1)
+        # yi = yi.squeeze(-1).squeeze(-1).permute(0,2,1)
+        # print(yi.shape)
+        # y = yi
+        # _, N, C = yi.shape
+        # y1.append(yi)
+        # y = torch.cat(y1,dim=0).reshape(1,N,C).to(x.device)
+
+        # print(y.shape)
+        # y = y.transpose(0,1)
+        # print(y.shape)
         for blk in self.decoder_blocks:
             x = blk(x, y)  ### feature interaction model
         x = self.decoder_norm(x)

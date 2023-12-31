@@ -42,7 +42,7 @@ for i, type in enumerate(unique_classes):
         
         file_name = d.replace('.mp4', '.npz')
         try:
-            examplars = np.load(os.path.join('exemplar_tokens', file_name))['arr_0']
+            examplars = np.load(os.path.join('exemplar_tokens_reencoded', file_name))['arr_0']
         except:
             print(f"{file_name} does not exist")
             continue

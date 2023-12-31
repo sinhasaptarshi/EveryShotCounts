@@ -34,7 +34,14 @@ def save_exemplar(dataloaders, model):
             num_exemplars = len(starts)
             # if split == 'train':
             for j in range(num_exemplars):
-                idx = np.linspace(starts[j].item(), ends[j].item(), 17)[:16].astype(int)
+                # peak = (starts[j].item() + ends[j].item())//2
+                # length = (ends[j].item() - starts[j].item())
+                # s, e = peak - length // 4, peak + length // 4
+                s = starts[j].item()
+                e = ends[j].item()
+                if starts[j] == ends[j]:
+                    continue
+                idx = np.linspace(s, e, 17)[:16].astype(int)
                 clips = video[:, idx]
                 clip_list.append(clips)
             # else:
@@ -43,7 +50,7 @@ def save_exemplar(dataloaders, model):
             #     clip_list.append(clips)
             
             data = torch.stack(clip_list).cuda()
-            print(data.shape)
+            # print(data.shape)
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=True):
                     '''
@@ -63,16 +70,16 @@ def save_exemplar(dataloaders, model):
                     '''
                     encoded, thw = model(data)
                     encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
-            print(encoded.shape)
+            # print(encoded.shape)
             
             enc_np = encoded.cpu().numpy()
             del encoded, data
             torch.cuda.empty_cache()
             
-            if not os.path.isdir(f'exemplar_tokens/{split}'):
-                os.makedirs(f'exemplar_tokens/{split}')
+            if not os.path.isdir(f'exemplar_tokens_reencoded'):
+                os.makedirs(f'exemplar_tokens_reencoded')
                 
-            np.savez('exemplar_tokens/{}.npz'.format(video_name), enc_np)
+            np.savez('exemplar_tokens_reencoded/{}.npz'.format(video_name), enc_np)
 
 def save_tokens(dataloaders, model):
     for split in ['train','test', 'val']:
@@ -82,7 +89,7 @@ def save_tokens(dataloaders, model):
             print(video_name)
             # if video_name != 'stu8_4.mp4':
             #     pass
-            print(video_name)
+            # print(video_name)
             C, T, H, W = video.shape
             padding = torch.zeros([C, 64, H, W])
             video = torch.cat([video, padding], 1)
@@ -103,10 +110,11 @@ def save_tokens(dataloaders, model):
             del encoded, data
             torch.cuda.empty_cache()
             
-            if not os.path.isdir(f'saved_tokens/{split}'):
-                os.makedirs(f'saved_tokens/{split}')
+            if not os.path.isdir(f'saved_tokens_reencoded'):
+                print('Creating folder')
+                os.makedirs(f'saved_tokens_reencoded')
             
-            np.savez('saved_tokens/{}.npz'.format(video_name), enc_np)
+            np.savez('saved_tokens_reencoded/{}.npz'.format(video_name), enc_np)
 
 
 def main():
@@ -114,14 +122,15 @@ def main():
     args = parser.parse_args()
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
+    print(args.save_exemplar_encodings)
+    print(args.save_video_encodings)
     args.data_path = '/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP'
 
     
 
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
     model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False).cuda()
-    model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
-    model.eval()
+    
 
     dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path,sampling_interval=1,encode_only=True)
     dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path,sampling_interval=1,encode_only=True)
@@ -149,11 +158,18 @@ def main():
         #state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
         
     for name, param in state_dict.items():
+        print(name)
         if name in model.state_dict().keys():
-            if 'decoder' not in name:
-                print(name)
+            # if 'decoder' not in name:
+                # print(name)
                 # new_name = name.replace('quantizer.', '')
-                model.state_dict()[name].copy_(param)
+                try:
+                    model.state_dict()[name].copy_(param)
+                except:
+                    print(f"parameters {name} not found")
+    model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
+    model.eval()
+
     if args.save_video_encodings:
         save_tokens(dataloaders, model)
     elif args.save_exemplar_encodings:

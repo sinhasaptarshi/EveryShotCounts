@@ -21,7 +21,7 @@ import timm
 assert timm.__version__ == "0.3.2"  # version check
 
 import util.misc as misc
-import models_mae_cross
+import CounTR.models_mae_cross as models_mae_cross
 
 
 def get_args_parser():

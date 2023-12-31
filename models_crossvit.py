@@ -120,9 +120,12 @@ class CrossAttention(nn.Module):
 
         attn = (q @ k.transpose(-2, -1)) * self.scale  # BHNx(C/H) @ BH(C/H)Ny -> BHNxNy
         attn = attn.softmax(dim=-1)
+        
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, Nx, C)  # (BHNxNy @ BHNy(C/H)) -> BHNx(C/H) -> BNxH(C/H) -> BNxC
+        # print('Max attention', attn.max())
+        # print('Mean attention', attn.min())
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -151,6 +154,8 @@ class CrossAttentionBlock(nn.Module):
 
     def forward(self, x, y):
         x = x + self.drop_path0(self.selfattn(self.norm0(x)))
+        # y = y + self.drop_path0(self.selfattn(self.norm0(y)))
         x = x + self.drop_path1(self.attn(self.norm1(x), y))
+        # x = self.drop_path1(self.attn(self.norm1(x), y))
         x = x + self.drop_path2(self.mlp(self.norm2(x)))
         return x
