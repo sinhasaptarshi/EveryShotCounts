@@ -87,7 +87,7 @@ class Rep_count(torch.utils.data.Dataset):
         return y_label
     
         
-    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=20, id=None):
+    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=20, id=None, cycle_start_id=0, count=None):
         try:
             tokens = np.load(path)['arr_0'] # Load in format C x t x h x w
         except:
@@ -96,9 +96,12 @@ class Rep_count(torch.utils.data.Dataset):
 
             
         if is_exemplar:
-            N = tokens.shape[0]
+            if count is not None:
+                N = count
+            else:
+                N = tokens.shape[0]
             if self.select_rand_segment or self.split == 'train':
-                idx = np.random.randint(N)
+                idx = cycle_start_id + np.random.randint(N)
                 # idx = 0
                 # shot_num = min(np.random.randint(1,3), N)
                 shot_num = 1
@@ -113,6 +116,9 @@ class Rep_count(torch.utils.data.Dataset):
                 #     idx = 0
 
             tokens = tokens[idx:idx+shot_num] ### return the encoding for a selected example per video instance
+            print(tokens.shape)
+            if tokens.shape[0] == 0:
+                print(path)
             tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
             # tokens = np.random.rand(tokens.shape[0], tokens.shape[1], tokens.shape[2], tokens.shape[3])
         else:
@@ -181,6 +187,8 @@ class Rep_count(torch.utils.data.Dataset):
         video_name = self.df.iloc[index]['name'].replace('.mp4', '.npz')
         row = self.df.iloc[index]
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not math.isnan(row[key])]
+        cycle_start_id = row['cycle_start_id']
+        count = row['count']
         
         if self.split in ['val', 'test']:
             lim_constraint = np.inf
@@ -202,6 +210,8 @@ class Rep_count(torch.utils.data.Dataset):
         select_frame_ids = frame_ids[low:up][0::8]
         density_map_alt = np.zeros(len(select_frame_ids))
         for i in range(0,len(cycle),2):
+            if cycle[i] == cycle[i+1]:
+                continue
             st, end = (cycle[i]//8) * 8, min(np.ceil(cycle[i+1]/8) * 8, select_frame_ids[-1])
             start_id = np.where(select_frame_ids == st)[0][0]
             end_id = np.where(select_frame_ids == end)[0][0]
@@ -224,9 +234,11 @@ class Rep_count(torch.utils.data.Dataset):
         ends = np.array(cycle[1::2])
         durations = ends - starts
         select_exemplar = durations.argmin()
-        # examplar_path = f"{self.exemplar_dir}/{video_name}"
-        examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '.npz')}"
-        example_rep = self.load_tokens(examplar_path,True, id=select_exemplar) 
+        examplar_path = f"{self.exemplar_dir}/{video_name}"
+        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '.npz')}"
+        example_rep = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=count) 
+        if example_rep.shape[1] == 0:
+            print(row)
         # example_rep = self.load_tokens(examplar_path, True)
         
         

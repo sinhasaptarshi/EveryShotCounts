@@ -32,7 +32,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
-    parser.add_argument('--accum_iter', default=1, type=int,
+    parser.add_argument('--accum_iter', default=2, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
                         help='Only testing')
@@ -62,7 +62,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--lr', type=float, default=5e-7, metavar='LR',
+    parser.add_argument('--lr', type=float, default=1e-7, metavar='LR',
                         help='learning rate (peaklr)')
     parser.add_argument('--init_lr', type=float, default=8e-6, metavar='LR',
                         help='learning rate (initial lr)')
@@ -229,6 +229,11 @@ def main():
     val_step = 0
     if args.only_test:
         model.load_state_dict(torch.load(args.trained_model)['model_state_dict'])
+        # model.decoder_blocks[0].attn.wq.reset_parameters()
+        # model.decoder_blocks[0].attn.wk.reset_parameters()
+        # model.decoder_blocks[1].attn.wk.reset_parameters()
+        # model.decoder_blocks[0].attn.wv.reset_parameters()
+        # model.decoder_blocks[1].attn.wv.reset_parameters()
         model.eval()
         print(f"Testing")
         dataloader = dataloaders['test']
@@ -354,7 +359,7 @@ def main():
                             # print(actual_counts)
             
                             
-                            y = model(data, example, thw, shot_num=1)
+                            y = model(data, example, thw)
                             # y = torch.nn.functional.relu(y)
                             if phase == 'train':
                                 mask = np.random.binomial(n=1, p=0.8, size=[1,density_map.shape[1]])
@@ -369,7 +374,7 @@ def main():
                             
                             # loss = (loss * masks / density_map.sum(1, keepdims=True)).sum() / density_map.shape[0]
                             loss = ((loss * masks) / density_map.shape[1]).sum() / density_map.shape[0]
-                            # loss = (loss * masks).sum() / density_map.shape[0]
+                            # loss = (loss * masks).sum() / density_map.shape[0]  ###non-normalized
                             
                             #print(item[4],data.shape,y.shape,density_map.shape)
                             predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts # sum density map
@@ -394,16 +399,17 @@ def main():
                             #     loss3 = 0 # Set to 0 for clearer logging
                             # loss = loss1
                             if phase=='train':
-                                loss /= args.accum_iter
+                                # loss1 = loss / args.accum_iter
+                                loss1 = loss
                                 # scaler(loss, optimizer, parameters=model.parameters(), update_grad=(i + 1) % args.accum_iter == 0)
 
-                                # scaler.scale(loss).backward()
-                                loss.backward()
+                                scaler.scale(loss1).backward()
+                                # loss1.backward()
                                 if (i + 1) % args.accum_iter == 0: ### accumulate gradient
-                                    # scaler.step(optimizer)
-                                    # scaler.update()
-                                    optimizer.step()
-                                    optimizer.zero_grad()
+                                    scaler.step(optimizer)
+                                    scaler.update()
+                                    # optimizer.step()
+                                    # optimizer.zero_grad()
                             
                             epoch_loss = loss.item()
                             count += data.shape[0]
@@ -475,12 +481,12 @@ def main():
                                 'epoch': epoch,
                                 'model_state_dict': model.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
-                                }, os.path.join(args.save_path, 'best.pyth'))
+                                }, os.path.join(args.save_path, 'best_1.pyth'))
                         torch.save({
                                 # 'epoch': epoch,
                                 'model_state_dict': model.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
-                                }, os.path.join(args.save_path, 'current.pyth'))
+                                }, os.path.join(args.save_path, 'current_1.pyth'))
     
     
     if args.use_wandb:                                   
