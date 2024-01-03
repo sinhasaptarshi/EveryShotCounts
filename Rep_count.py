@@ -123,7 +123,9 @@ class Rep_count(torch.utils.data.Dataset):
         # self.df = self.df[self.df['fps'] >= 10]
         # self.df = self.df[(self.df['name'] == 'stu9_71.mp4')]# or (self.df['name'] =='stu9_7.mp4')]
         self.df = self.df[self.df['num_frames'] > 64]
-        self.df = self.df[self.df['name'] == 'stu4_3.mp4']
+        # self.df = self.df[self.df['name'] == 'test118.mp4']
+        # self.df = pd.concat([self.df, self.df])
+
         self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
         self.df = self.df[self.df['count'] > 0] # remove no reps
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
@@ -132,7 +134,7 @@ class Rep_count(torch.utils.data.Dataset):
         else:
             self.num_frames = 16 
         
-        self.transform =  pytorchvideo.transforms.create_video_transform(mode=self.split,
+        self.transform =  pytorchvideo.transforms.create_video_transform(mode="test",
                                                                     convert_to_float=False,
                                                                     min_size = 224,
                                                                     crop_size = 224,
@@ -290,6 +292,7 @@ class Rep_count(torch.utils.data.Dataset):
         row = self.df.iloc[index]
         duration = row['num_frames']
         clc = [int(float(row[key])) for key in row.keys() if 'L' in key and not np.isnan(row[key])]
+        # print(len(clc))
         starts = clc[0::2]
         ends = clc[1::2]
         exemplar_index = random.randint(0, len(starts)-1)
@@ -312,7 +315,7 @@ class Rep_count(torch.utils.data.Dataset):
         vdur = (frame_idx[-1] - frame_idx[0]) / row['fps']
         #print(f"""Sampled frames [count: {count:.2f} | duration: {vdur:.2f}] full video [count: {row['count']} | duration: {row['duration']:.2f}] """)
         
-        
+        # print(vid)
         vid = self.transform(vid/255.)  
         if exemplar is not None:
             exemplar = self.transform_exemplar(exemplar/255) 

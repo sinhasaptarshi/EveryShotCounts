@@ -32,7 +32,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=200, type=int)
-    parser.add_argument('--accum_iter', default=2, type=int,
+    parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
                         help='Only testing')
@@ -253,7 +253,7 @@ def main():
                 video_name = item[4]
                 thw = item[5]
                 with torch.no_grad():
-                    y = model(data, example, thw, shot_num=1)
+                    y = model(data, example, thw)
                     # y = torch.nn.functional.relu(y)
                 # print(video_name[0])
                 mse = ((y - density_map)**2).sum(-1)
@@ -354,7 +354,7 @@ def main():
                             # print(data.shape)
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             density_map = item[2].cuda().type(torch.cuda.FloatTensor).half() * args.scale_counts
-                            actual_counts = item[3].cuda() # B x 1
+                            actual_counts = item[3].cpu() # B x 1
                             thw = item[5]
                             # print(actual_counts)
             
@@ -377,7 +377,7 @@ def main():
                             # loss = (loss * masks).sum() / density_map.shape[0]  ###non-normalized
                             
                             #print(item[4],data.shape,y.shape,density_map.shape)
-                            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts # sum density map
+                            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cpu() / args.scale_counts # sum density map
                             # print(predict_count)
                             if phase == 'val':
                                 ground_truth.append(actual_counts.detach().cpu().numpy())
@@ -409,7 +409,8 @@ def main():
                                     scaler.step(optimizer)
                                     scaler.update()
                                     # optimizer.step()
-                                    # optimizer.zero_grad()
+                                    optimizer.zero_grad()
+                                    torch.cuda.empty_cache()
                             
                             epoch_loss = loss.item()
                             count += data.shape[0]
@@ -486,7 +487,7 @@ def main():
                                 # 'epoch': epoch,
                                 'model_state_dict': model.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
-                                }, os.path.join(args.save_path, 'current_1.pyth'))
+                                }, os.path.join(args.save_path, 'epoch_{}.pyth'.format(str(epoch).zfill(3))))
     
     
     if args.use_wandb:                                   

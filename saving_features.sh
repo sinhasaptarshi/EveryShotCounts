@@ -6,7 +6,7 @@
 #SBATCH --job-name=vtf
 #SBATCH --mem=500GB
 #SBATCH --nodes=1
-#SBATCH --partition=long
+#SBATCH --partition=devel
 #SBATCH --time=0-03:00:00
 
 

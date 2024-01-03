@@ -97,16 +97,20 @@ class Rep_count(torch.utils.data.Dataset):
             
         if is_exemplar:
             if count is not None:
-                N = count
+                N = round(count)
             else:
                 N = tokens.shape[0]
             if self.select_rand_segment or self.split == 'train':
+                # print(N)
                 idx = cycle_start_id + np.random.randint(N)
+                # print(idx)
                 # idx = 0
                 # shot_num = min(np.random.randint(1,3), N)
                 shot_num = 1
             else:
-                idx = 0
+                
+                idx = id if id is not None else 0
+                
                 # shot_num = min(1, N)
                 shot_num = 1
                 # if id is not None:
@@ -116,7 +120,7 @@ class Rep_count(torch.utils.data.Dataset):
                 #     idx = 0
 
             tokens = tokens[idx:idx+shot_num] ### return the encoding for a selected example per video instance
-            print(tokens.shape)
+            # print(tokens.shape)
             if tokens.shape[0] == 0:
                 print(path)
             tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
@@ -188,7 +192,7 @@ class Rep_count(torch.utils.data.Dataset):
         row = self.df.iloc[index]
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not math.isnan(row[key])]
         cycle_start_id = row['cycle_start_id']
-        count = row['count']
+        
         
         if self.split in ['val', 'test']:
             lim_constraint = np.inf
@@ -220,6 +224,8 @@ class Rep_count(torch.utils.data.Dataset):
         # print(density_map_alt.sum())
         # gt_density = density_map_alt
         gt_density = ndimage.gaussian_filter1d(density_map_alt, sigma=1, order=0)
+        count = gt_density.sum()
+        # print(count)
         
 
 
@@ -233,10 +239,15 @@ class Rep_count(torch.utils.data.Dataset):
         starts = np.array(cycle[0::2])
         ends = np.array(cycle[1::2])
         durations = ends - starts
-        select_exemplar = durations.argmin()
-        examplar_path = f"{self.exemplar_dir}/{video_name}"
-        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '.npz')}"
-        example_rep = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=count) 
+        durations = durations.astype(np.float32)
+        durations[durations == 0] = 0
+        select_exemplar = durations.argmax()
+        examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
+        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '_new.npz')}"
+        if self.split == 'train':
+            example_rep = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=count) 
+        else:
+            example_rep = self.load_tokens(examplar_path,True, id = None, count=count) 
         if example_rep.shape[1] == 0:
             print(row)
         # example_rep = self.load_tokens(examplar_path, True)

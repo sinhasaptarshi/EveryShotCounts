@@ -75,6 +75,9 @@ class Attention(nn.Module):
         self.scale = qk_scale or head_dim ** -0.5
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        # self.q = nn.Linear(dim, dim, bias=qkv_bias)
+        # self.k = nn.Linear(dim, dim, bias=qkv_bias)
+        # self.v = nn.Linear(dim, dim, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -82,6 +85,9 @@ class Attention(nn.Module):
     def forward(self, x):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        # q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).reshape(0,2,1,3)
+        # k = self.k(x).reshape(B, N, self.num_heads, C // self.num_heads).reshape(0,2,1,3)
+        # v = self.v(x).reshape(B, N, self.num_heads, C // self.num_heads).reshape(0,2,1,3)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
         attn = (q @ k.transpose(-2, -1)) * self.scale

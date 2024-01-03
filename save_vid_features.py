@@ -16,7 +16,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--num_gpus', default=4, type=int)
-    parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
+    parser.add_argument('--pretrained_encoder', default ='pretrained_models/pretrained.pyth', type=str)
     parser.add_argument('--save_exemplar_encodings', default=False, type=bool)
     return parser
 
@@ -24,6 +24,10 @@ def save_exemplar(dataloaders, model):
     for split in ['train', 'val','test']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
+            # print(video.shape)
+            # print(video.max())
+            # print(video.min())
+            # print(video.mean())
             starts = item[-3]
             ends = item[-2]
             video_name = item[-1][0]
@@ -32,6 +36,7 @@ def save_exemplar(dataloaders, model):
 
             clip_list = []
             num_exemplars = len(starts)
+            # print(num_exemplars)
             # if split == 'train':
             for j in range(num_exemplars):
                 # peak = (starts[j].item() + ends[j].item())//2
@@ -79,7 +84,7 @@ def save_exemplar(dataloaders, model):
             if not os.path.isdir(f'exemplar_tokens_reencoded'):
                 os.makedirs(f'exemplar_tokens_reencoded')
                 
-            np.savez('exemplar_tokens_reencoded/{}.npz'.format(video_name), enc_np)
+            np.savez('exemplar_tokens_reencoded/{}_new.npz'.format(video_name), enc_np)
 
 def save_tokens(dataloaders, model):
     for split in ['train','test', 'val']:
@@ -101,6 +106,7 @@ def save_tokens(dataloaders, model):
                 clips = video[:,idx]
                 clip_list.append(clips)
             data = torch.stack(clip_list).cuda()
+            # print(data)
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=True):
                     encoded, thw = model(data)
@@ -156,18 +162,47 @@ def main():
     if args.pretrained_encoder:
         state_dict = torch.load(args.pretrained_encoder)['model_state']
         #state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
-        
-    for name, param in state_dict.items():
-        print(name)
-        if name in model.state_dict().keys():
-            # if 'decoder' not in name:
-                # print(name)
-                # new_name = name.replace('quantizer.', '')
-                try:
-                    model.state_dict()[name].copy_(param)
-                except:
-                    print(f"parameters {name} not found")
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
+    # for name, param in state_dict.items():
+    #     # print(name)
+    #     if args.num_gpus > 1:
+    #         name = f'module.{name}'
+    #     if name in model.state_dict().keys():
+    #         # if 'decoder' not in name:
+    #             print(name)
+    #             # new_name = name.replace('quantizer.', '')
+    #             try:
+    #                 model.state_dict()[name].copy_(param)
+    #             except:
+    #                 print(f"parameters {name} not found")
+    print(state_dict.keys())
+    for name in model.state_dict().keys():
+        if 'decoder' in name:
+            continue
+        matched = 0
+
+        for name_, param in state_dict.items():
+            if args.num_gpus > 1:
+                name_ = f'module.{name_}'
+            if name_ == name:
+                model.state_dict()[name].copy_(param)
+                matched = 1
+                break
+            elif '.qkv.' in name:
+                q_name = name.replace('.qkv.', '.q.').replace('module.', '')
+                k_name = name.replace('.qkv.', '.k.').replace('module.', '')
+                v_name = name.replace('.qkv.', '.v.').replace('module.', '')
+                params = torch.cat([state_dict[q_name], state_dict[k_name], state_dict[v_name]])
+                model.state_dict()[name].copy_(params)
+                matched = 1
+                break
+        if matched == 0:
+            print(f"parameters {name} not found")
+        # else:
+        #     print(f"parameters {name} found")
+        
+
+    
     model.eval()
 
     if args.save_video_encodings:
