@@ -14,4 +14,4 @@ source /jmain02/home/J2AD001/wwp01/shared/home/etc/profile
 conda activate repcount
 
 export WANDB_MODE=offline
-python exemplar_counting_train.py --num_gpus 1 --dataset RepCount --save_path saved_models_repcountfull --token_pool_ratio 0.4
+python exemplar_counting_train.py --num_gpus 1 --tokens_dir saved_tokens_countix --exemplar_dir exemplar_tokens_countix --save_path ./saved_models_countix

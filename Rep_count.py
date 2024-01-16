@@ -11,6 +11,7 @@ from tqdm import tqdm
 import random
 from label_norm import normalize_label
 from pytorchvideo.data.utils import thwc_to_cthw
+from pytorchvideo.transforms import create_video_transform
 from itertools import cycle, islice
 
 import pytorchvideo
@@ -134,20 +135,20 @@ class Rep_count(torch.utils.data.Dataset):
         else:
             self.num_frames = 16 
         
-        self.transform =  pytorchvideo.transforms.create_video_transform(mode="test",
-                                                                    convert_to_float=False,
-                                                                    min_size = 224,
-                                                                    crop_size = 224,
-                                                                    num_samples = None,
-                                                                    video_mean = [0.485,0.456,0.406], 
-                                                                    video_std = [0.229,0.224,0.225])
-        self.transform_exemplar =  pytorchvideo.transforms.create_video_transform(mode=self.split,
-                                                                    convert_to_float=False,
-                                                                    min_size = 224,
-                                                                    crop_size = 224,
-                                                                    num_samples = 3,
-                                                                    video_mean = [0.485,0.456,0.406], 
-                                                                    video_std = [0.229,0.224,0.225])
+        self.transform =  create_video_transform(mode="test",
+                                                convert_to_float=False,
+                                                min_size = 224,
+                                                crop_size = 224,
+                                                num_samples = None,
+                                                video_mean = [0.485,0.456,0.406], 
+                                                video_std = [0.229,0.224,0.225])
+        self.transform_exemplar =  create_video_transform(mode=self.split,
+                                                        convert_to_float=False,
+                                                        min_size = 224,
+                                                        crop_size = 224,
+                                                        num_samples = 3,
+                                                        video_mean = [0.485,0.456,0.406], 
+                                                        video_std = [0.229,0.224,0.225])
     
     def preprocess(self,video_frame_length, time_points, num_frames):
         """

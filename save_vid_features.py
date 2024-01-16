@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from Rep_count import Rep_count
+from Countix import Countix
 from video_mae_cross import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
@@ -18,10 +19,11 @@ def get_args_parser():
     parser.add_argument('--num_gpus', default=4, type=int)
     parser.add_argument('--pretrained_encoder', default ='pretrained_models/pretrained.pyth', type=str)
     parser.add_argument('--save_exemplar_encodings', default=False, type=bool)
+    parser.add_argument('--dataset', default='Repcount', help='choose from [Repcount, Countix]', type=str)
     return parser
 
 def save_exemplar(dataloaders, model):
-    for split in ['train', 'val','test']:
+    for split in ['train', 'val', 'test']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             # print(video.shape)
@@ -32,6 +34,8 @@ def save_exemplar(dataloaders, model):
             ends = item[-2]
             video_name = item[-1][0]
             print(video_name)
+            if os.path.exists('exemplar_tokens_countix/{}_new.npz'.format(video_name)):
+                continue
             C, T, H, W = video.shape
 
             clip_list = []
@@ -81,17 +85,19 @@ def save_exemplar(dataloaders, model):
             del encoded, data
             torch.cuda.empty_cache()
             
-            if not os.path.isdir(f'exemplar_tokens_reencoded'):
-                os.makedirs(f'exemplar_tokens_reencoded')
+            if not os.path.isdir(f'exemplar_tokens_countix'):
+                os.makedirs(f'exemplar_tokens_countix')
                 
-            np.savez('exemplar_tokens_reencoded/{}_new.npz'.format(video_name), enc_np)
+            np.savez('exemplar_tokens_countix/{}_new.npz'.format(video_name), enc_np)
 
 def save_tokens(dataloaders, model):
-    for split in ['train','test', 'val']:
+    for split in ['val']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
+            if os.path.exists('saved_tokens_countix/{}_new.npz'.format(video_name)):
+                continue
             # if video_name != 'stu8_4.mp4':
             #     pass
             # print(video_name)
@@ -116,11 +122,11 @@ def save_tokens(dataloaders, model):
             del encoded, data
             torch.cuda.empty_cache()
             
-            if not os.path.isdir(f'saved_tokens_reencoded'):
+            if not os.path.isdir(f'saved_tokens_countix'):
                 print('Creating folder')
-                os.makedirs(f'saved_tokens_reencoded')
+                os.makedirs(f'saved_tokens_countix')
             
-            np.savez('saved_tokens_reencoded/{}.npz'.format(video_name), enc_np)
+            np.savez('saved_tokens_countix/{}.npz'.format(video_name), enc_np)
 
 
 def main():
@@ -137,10 +143,15 @@ def main():
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
     model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False).cuda()
     
+    if args.dataset == 'RepCount':
+        dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path,sampling_interval=1,encode_only=True)
+        dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path,sampling_interval=1,encode_only=True)
+        dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path,sampling_interval=1,encode_only=True)
+    elif args.dataset == 'Countix':
+        dataset_train = Countix(cfg=cfg,split="train",sampling_interval=1,encode_only=True)
+        dataset_val = Countix(cfg=cfg,split="val",sampling_interval=1,encode_only=True)
+        dataset_test = Countix(cfg=cfg,split="test",sampling_interval=1,encode_only=True)
 
-    dataset_train = Rep_count(cfg=cfg,split="train",data_dir=args.data_path,sampling_interval=1,encode_only=True)
-    dataset_val = Rep_count(cfg=cfg,split="valid",data_dir=args.data_path,sampling_interval=1,encode_only=True)
-    dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path,sampling_interval=1,encode_only=True)
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
                                                        num_workers=8,
@@ -164,10 +175,13 @@ def main():
         #state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
     model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     # for name, param in state_dict.items():
-    #     # print(name)
+    # #     # print(name)
     #     if args.num_gpus > 1:
     #         name = f'module.{name}'
     #     if name in model.state_dict().keys():
+    #         continue
+    #     else:
+    #         print(name)
     #         # if 'decoder' not in name:
     #             print(name)
     #             # new_name = name.replace('quantizer.', '')
@@ -175,7 +189,7 @@ def main():
     #                 model.state_dict()[name].copy_(param)
     #             except:
     #                 print(f"parameters {name} not found")
-    print(state_dict.keys())
+    # print(state_dict.keys())
     for name in model.state_dict().keys():
         if 'decoder' in name:
             continue

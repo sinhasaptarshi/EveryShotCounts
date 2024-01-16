@@ -14,13 +14,13 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 
 import einops
 
-class Rep_count(torch.utils.data.Dataset):
+class Countix(torch.utils.data.Dataset):
     def __init__(self,
                  split="train",
                  add_noise= False,
                  num_frames=512,
-                 tokens_dir = "saved_tokens_reencoded",
-                 exemplar_dir = "exemplar_tokens_reencoded",
+                 tokens_dir = "saved_tokens_countix",
+                 exemplar_dir = "exemplar_tokens_countix",
                  density_maps_dir = "gt_density_maps_recreated",
                  select_rand_segment=True,
                  compact=False,
@@ -38,21 +38,20 @@ class Rep_count(torch.utils.data.Dataset):
         self.split = split # set the split to load
         self.add_noise = add_noise # add noise to frames (augmentation)
         # if self.split == 'train':
-        #     # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
-        #     # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
-        #     # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
-        #     csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
+            # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
+            # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
+            # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
+        csv_path = f"datasets/countix/new_{self.split}.csv"
         # else:
         #     csv_path = f"datasets/repcount/test_with_fps.csv"
-        csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
         self.df['density_map_sum'] = 0
-        self.df = self.df[self.df['count'].notna()]
+        self.df = self.df[self.df['counts'].notna()]
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # self.df = self.df[self.df['fps'] >= 10]
-        self.df = self.df[self.df['num_frames'] > 64]
-        self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
-        self.df = self.df[self.df['count'] > 0] # remove no reps
+        self.df = self.df[self.df['num_frames'] > 0]
+        # self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
+        self.df = self.df[self.df['counts'] > 0] # remove no reps
         # self.df = self.df.drop(self.df.loc[self.df['name']=='stu9_69.mp4'].index)
         # self.df = self.df[self.df['num_frames'] < 1800]
         print(f"--- Loaded: {len(self.df)} videos for {self.split} --- " )
@@ -189,16 +188,13 @@ class Rep_count(torch.utils.data.Dataset):
       
     
     def __getitem__(self, index):
-        video_name = self.df.iloc[index]['name'].replace('.mp4', '.npz')
+        video_name = self.df.iloc[index]['video_id'].replace('.mp4', '.npz')
         row = self.df.iloc[index]
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not math.isnan(row[key])]
-        try:
-            cycle_start_id = row['cycle_start_id']
-        except:
-            cycle_start_id = 0
+        cycle_start_id = 0
         # print(row['count'])
         if self.split == 'train':
-            lim_constraint = 150
+            lim_constraint = np.inf
         else:
             lim_constraint = np.inf
         
@@ -207,10 +203,14 @@ class Rep_count(torch.utils.data.Dataset):
         #     lim_constraint = np.inf
         # else:
         #     lim_constraint = np.inf
-
-        segment_start = row['segment_start']
-        segment_end = row['segment_end']  
-        num_frames = row['num_frames']   
+        try:
+            segment_start = row['segment_start']
+            segment_end = row['segment_end']  
+            num_frames = row['num_frames']   
+        except:
+            segment_start = 0
+            segment_end = row['num_frames']
+            num_frames = row['num_frames']
         # 
         # segment_start = 0
         # segment_end = row['num_frames']   
@@ -226,17 +226,19 @@ class Rep_count(torch.utils.data.Dataset):
         for i in range(0,len(cycle),2):
             if cycle[i] == cycle[i+1]:
                 continue
-            actual_counts += 1
+            
             st, end = (cycle[i]//8) * 8, min(np.ceil(cycle[i+1]/8) * 8, select_frame_ids[-1])
             if st in select_frame_ids and end in select_frame_ids:
                 start_id = np.where(select_frame_ids == st)[0][0]
                 end_id = np.where(select_frame_ids == end)[0][0]
                 mid = (start_id + end_id)//2
                 density_map_alt[mid] = 1
+                # actual_counts += 1
         # print(density_map_alt.sum())
         # gt_density = density_map_alt
+        
         gt_density = ndimage.gaussian_filter1d(density_map_alt, sigma=1, order=0)
-        count = gt_density.sum()
+        actual_counts = gt_density.sum()
         # print(count)
         
 
@@ -255,9 +257,9 @@ class Rep_count(torch.utils.data.Dataset):
         durations[durations == 0] = 0
         select_exemplar = durations.argmax()
         examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
-        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '_new.npz')}"
+        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['video_id'].replace('.mp4', '_new.npz')}"
         if self.split == 'train':
-            example_rep = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=min(actual_counts,6)) 
+            example_rep = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=actual_counts) 
         else:
             example_rep = self.load_tokens(examplar_path,True, id = None, count=actual_counts) 
         if example_rep.shape[1] == 0:
@@ -282,7 +284,7 @@ class Rep_count(torch.utils.data.Dataset):
             gt_density = torch.from_numpy(gt_density).half() 
             # if row['count'] > gt_density.sum():
             #     print(row['count'],gt_density.sum(),self.df.iloc[index]['name'][:-4])
-            return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4], list(vid_tokens.shape[-3:]) 
+            return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['video_id'][:-4], list(vid_tokens.shape[-3:]) 
         
         T = row['num_frames'] ### number of frames in the video
         if T <= self.num_frames:
@@ -300,7 +302,7 @@ class Rep_count(torch.utils.data.Dataset):
         gt = gt_density[(start//4): (end//4)]
         # print(gt.sum())
 
-        return sampled_segments, example_rep, gt, gt.sum(), self.df.iloc[index]['name'][:-4], thw
+        return sampled_segments, example_rep, gt, gt.sum(), self.df.iloc[index]['video_id'][:-4], thw
         
 
     def __len__(self):
@@ -333,7 +335,7 @@ class Rep_count(torch.utils.data.Dataset):
 ## testing
 if __name__=='__main__':
     from tqdm import tqdm
-    dat = Rep_count(select_rand_segment=False, compact=False, pool_tokens_factor=0.5)
+    dat = Countix(select_rand_segment=False, compact=False, pool_tokens_factor=0.5)
     print('--- dataset created ---')
     device = torch.device("cpu")
     print(f'Device: {device}')

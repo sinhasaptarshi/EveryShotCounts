@@ -7,11 +7,11 @@
 #SBATCH --mem=500GB
 #SBATCH --nodes=1
 #SBATCH --partition=small
-#SBATCH --time=0-30:00:00
+#SBATCH --time=0-10:00:00
 
 
 source /jmain02/home/J2AD001/wwp01/shared/home/etc/profile
 conda activate repcount
 
 export WANDB_MODE=offline
-python exemplar_counting_train.py --num_gpus 1 --only_test --trained_model saved_models/checkpoint_epoch_00140.pyth
+python exemplar_counting_train.py --num_gpus 1 --only_test --trained_model saved_models_repcountfull/epoch_136.pyth --token_pool_ratio 0.4

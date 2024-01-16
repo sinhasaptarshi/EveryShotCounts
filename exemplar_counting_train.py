@@ -2,12 +2,15 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os, sys
-from Rep_count_loader import Rep_count
+# from Rep_count_loader import Rep_count
+from Repcount_balanced_loader import Rep_count
+from Countix_loader import Countix
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE
 from video_memae import RepMem
 from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
+from util.pos_embed import get_2d_sincos_pos_embed
 import argparse
 import wandb
 import torch.optim as optim
@@ -40,12 +43,14 @@ def get_args_parser():
                         help='path to a trained model')
     parser.add_argument('--scale_counts', default=100, type=int, help='scaling the counts')
 
+    parser.add_argument('--dataset', default='RepCount', type=str, help='Repcount, Countix')
+
 
 
     # Model parameters
     parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--save_path', default='./saved_models_fulldata', type=str, help="Path to save the model")
+    parser.add_argument('--save_path', default='./saved_models_repcountfull', type=str, help="Path to save the model")
 
     parser.add_argument('--mask_ratio', default=0.5, type=float,
                         help='Masking ratio (percentage of removed patches).')
@@ -62,7 +67,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--lr', type=float, default=1e-7, metavar='LR',
+    parser.add_argument('--lr', type=float, default=2e-6, metavar='LR',
                         help='learning rate (peaklr)')
     parser.add_argument('--init_lr', type=float, default=8e-6, metavar='LR',
                         help='learning rate (initial lr)')
@@ -123,7 +128,7 @@ def get_args_parser():
     parser.add_argument("--team", default="repetition_counting", type=str)
     parser.add_argument("--wandb_id", default=None, type=str)
     
-    parser.add_argument("--token_pool_ratio", default=0.4, type=float)
+    parser.add_argument("--token_pool_ratio", default=0.6, type=float)
 
     return parser
 
@@ -137,35 +142,58 @@ def main():
     args.opts = None
     g = torch.Generator()
     g.manual_seed(args.seed)
-    if args.use_wandb:
-        wandb_run = wandb.init(
-                    config=args,
-                    resume="allow",
-                    project=args.wandb,
-                    entity=args.team,
-                    id=args.wandb_id,
-                )
+    
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
     
     
     
     if args.precomputed:
-        dataset_train = Rep_count(split="train",
-                                  tokens_dir = args.tokens_dir,
-                                  exemplar_dir = args.exemplar_dir,
-                                  density_maps_dir = args.gt_dir,
-                                  select_rand_segment=False, 
-                                  compact=True, 
-                                  pool_tokens_factor=args.token_pool_ratio)
-        
-        dataset_valid = Rep_count(split="valid",
-                                  tokens_dir = args.tokens_dir,
-                                  exemplar_dir = args.exemplar_dir,
-                                  density_maps_dir = args.gt_dir,
-                                  select_rand_segment=False, 
-                                  compact=True, 
-                                  pool_tokens_factor=args.token_pool_ratio)
-    
+        if args.dataset == 'Countix':
+            dataset_train = Countix(split="train",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio)
+            
+            dataset_valid = Countix(split="val",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio)
+            dataset_test = Countix(split="test",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio)
+        elif args.dataset == 'RepCount':
+            dataset_train = Rep_count(split="train",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio)
+            
+            dataset_valid = Rep_count(split="valid",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio)
+            dataset_test = Rep_count(split="test",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio)
         #dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
     
         # Create dict of dataloaders for train and val
@@ -177,6 +205,7 @@ def main():
                                                            drop_last=False,
                                                            collate_fn=dataset_train.collate_fn,
                                                            worker_init_fn=seed_worker,
+                                                           persistent_workers=True,
                                                            generator=g),
                        'val':torch.utils.data.DataLoader(dataset_valid,
                                                          batch_size=args.batch_size,
@@ -187,7 +216,7 @@ def main():
                                                          collate_fn=dataset_valid.collate_fn,
                                                          worker_init_fn=seed_worker,
                                                          generator=g),
-                        'test':torch.utils.data.DataLoader(dataset_valid,
+                        'test':torch.utils.data.DataLoader(dataset_test,
                                                          batch_size=1,
                                                          num_workers=args.num_workers,
                                                          shuffle=False,
@@ -200,7 +229,7 @@ def main():
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     # scaler = NativeScaler()
     
-    model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed).cuda()
+    model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio).cuda()
     #model = RepMem().cuda()
     if args.num_gpus > 1:
         model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
@@ -229,6 +258,7 @@ def main():
     val_step = 0
     if args.only_test:
         model.load_state_dict(torch.load(args.trained_model)['model_state_dict'])
+        # model.decoder_spatial_pos_embed.data = torch.from_numpy(get_2d_sincos_pos_embed(512, 8).astype(np.float32)).cuda()
         # model.decoder_blocks[0].attn.wq.reset_parameters()
         # model.decoder_blocks[0].attn.wk.reset_parameters()
         # model.decoder_blocks[1].attn.wk.reset_parameters()
@@ -251,31 +281,48 @@ def main():
                 density_map = item[2].cuda().type(torch.cuda.FloatTensor).half() * args.scale_counts
                 actual_counts = item[3].cuda() # B x 1
                 video_name = item[4]
+                b, n, c = data.shape
+                # print(data.shape)
+                # data_ = data.reshape(b, -1, 36, c)
+                pred = torch.zeros(b, 0).cuda()
+
                 thw = item[5]
                 with torch.no_grad():
-                    y = model(data, example, thw)
+                    pred = model(data, example, thw)
+                    # for i in range(0, data_.shape[1], 48):
+                    #     data = data_[:, i: min(i+48, data.shape[1])]
+                    #     k = data.shape[1]
+                    #     if data.shape[1] < 48:
+                    #         data = torch.cat([data, torch.zeros(b, 48-data.shape[1], 36, c).cuda()], 1)
+                    #     data = data.reshape(b, -1, c)
+                    #     y = model(data, example, thw)
+                    #     y = y[:, :k]
+                    #     pred = torch.cat([pred, y], 1)
+                        # print(pred.shape)
                     # y = torch.nn.functional.relu(y)
                 # print(video_name[0])
-                mse = ((y - density_map)**2).sum(-1)
-                np.savez('predictions_smallsubset_noupsampling/'+video_name[0]+'.npz', y[0].cpu().numpy())
-                np.savez('gt_smallsubset_noupsampling/'+video_name[0]+'.npz', density_map[0].cpu().numpy())
-                predict_counts = torch.sum(y, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts
+                mse = ((pred - density_map)**2).mean(-1)
+                np.savez('repcount_density_maps/'+video_name[0]+'_preds.npz', pred[0].cpu().numpy())
+                np.savez('repcount_density_maps/'+video_name[0]+'_gt.npz', density_map[0].cpu().numpy())
+                predict_counts = torch.sum(pred, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts
                 predictions.extend(predict_counts.detach().cpu().numpy())
                 gt_counts.extend(actual_counts.detach().cpu().numpy())
                 mae = torch.div(torch.abs(predict_counts - actual_counts), actual_counts + 1e-1)
                 predict_mae.extend(mae.cpu().numpy())
-                clips.append(data.shape[1]//(8*7*7))
+                predict_mse.extend(np.sqrt(mse.cpu().numpy()))
+                clips.append(data.shape[1]//(8*9*9))
                 # print(predict_mae)
 
         predict_mae = np.array(predict_mae)
         predictions = np.array(predictions)
         gt_counts = np.array(gt_counts)
+        predict_mse = np.array(predict_mse)
         # df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
-        # df['predictions'] = predictions
+        # df['loss'] = predict_mse
         # df.to_csv('datasets/repcount/validtest_with_fps.csv')
         clips = np.array(clips)
-        min = clips.min()
-        max = clips.max()
+        min_ = clips.min()
+        max_ = clips.max()
 
         print(gt_counts)
         diff = np.abs(predictions - gt_counts)
@@ -284,13 +331,25 @@ def main():
         print(f'OBO: {(diff<=1).sum()/ len(diff)}')
         print(f'OBZ: {(diff_z==0).sum()/ len(diff)}')
         print(f'RMSE: {np.sqrt((diff**2).mean())}')
-        for counts in range(1,7):
+        for counts in range(1,round(gt_counts.max())+1):
             print(f"MAE for count {counts} is {predict_mae[gt_counts <= counts].mean()}")
-        for duration in np.linspace(min, max, 10)[1:]:
+        for counts in range(1,round(gt_counts.max())+1):
+            print(f"RMSE for count {counts} is {np.sqrt((diff**2)[gt_counts <= counts].mean())}")
+        for duration in np.linspace(min_, max_, 10)[1:]:
             print(f"MAE for duration less that {duration} is {predict_mae[clips <= duration].mean()}")
+        for duration in np.linspace(min_, max_, 10)[1:]:
+            print(f"RMSE for duration less that {duration} is {np.sqrt((diff**2)[clips <= duration].mean())}")
 
         return
 
+    if args.use_wandb:
+            wandb_run = wandb.init(
+                        config=args,
+                        resume="allow",
+                        project=args.wandb,
+                        entity=args.team,
+                        id=args.wandb_id,
+                    )
     param_groups = optim_factory.add_weight_decay(model, args.weight_decay)
     # optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, betas=(0.9, 0.95))
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
@@ -299,7 +358,7 @@ def main():
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.8)
     lossMSE = nn.MSELoss().cuda()
     lossSL1 = nn.SmoothL1Loss().cuda()
-    best_rmse = np.inf
+    best_loss = np.inf
 
     os.makedirs(args.save_path, exist_ok=True)
     for epoch in range(args.epochs):
@@ -370,10 +429,11 @@ def main():
                             
                             
                             masks = torch.from_numpy(masks).cuda()
-                            loss = (y - density_map) ** 2
-                            
-                            # loss = (loss * masks / density_map.sum(1, keepdims=True)).sum() / density_map.shape[0]
-                            loss = ((loss * masks) / density_map.shape[1]).sum() / density_map.shape[0]
+                            loss = ((y - density_map) ** 2) #+ (0.2 * (y / args.scale_counts).abs()) 
+                            counts = density_map.sum(1, keepdims=True) / args.scale_counts
+                            counts[counts == 0] = 1
+                            # loss = (loss * masks / counts / density_map.shape[1]).sum() / density_map.shape[0]
+                            loss = ((loss * masks) / density_map.shape[1]).sum() / density_map.shape[0]  ### normalized by duration
                             # loss = (loss * masks).sum() / density_map.shape[0]  ###non-normalized
                             
                             #print(item[4],data.shape,y.shape,density_map.shape)
@@ -399,8 +459,8 @@ def main():
                             #     loss3 = 0 # Set to 0 for clearer logging
                             # loss = loss1
                             if phase=='train':
-                                # loss1 = loss / args.accum_iter
-                                loss1 = loss
+                                loss1 = loss / args.accum_iter
+                                # loss1 = loss
                                 # scaler(loss, optimizer, parameters=model.parameters(), update_grad=(i + 1) % args.accum_iter == 0)
 
                                 scaler.scale(loss1).backward()
@@ -445,7 +505,7 @@ def main():
                             #         })
                             
                             pbar.set_description(f"EPOCH: {epoch:02d} | PHASE: {phase} ")
-                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{mae/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f}")
+                            pbar.set_postfix_str(f" LOSS: {total_loss_all/count:.2f} | MAE:{mae/count:.2f} | LOSS ITER: {loss.item():.2f} | OBZ: {off_by_zero/count:.2f} | OBO: {off_by_one/count:.2f} | RMSE: {np.sqrt(mse/count):.3f}")
                             pbar.update()
                              
                 
@@ -476,8 +536,8 @@ def main():
                             "val_mae": mae/count, 
                             "val_rmse": np.sqrt(mse/count)
                         })
-                        if np.sqrt(mse/count) < best_rmse:
-                            best_rmse = np.sqrt(mse/count)
+                        if total_loss_all/float(count) < best_loss:
+                            best_loss = total_loss_all/float(count)
                             torch.save({
                                 'epoch': epoch,
                                 'model_state_dict': model.state_dict(),

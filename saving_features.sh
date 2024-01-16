@@ -14,5 +14,5 @@ source /jmain02/home/J2AD001/wwp01/shared/home/etc/profile
 conda activate repcount
 
 export WANDB_MODE=offline
-python save_vid_features.py --num_gpus 4 
+python save_vid_features.py --dataset Countix --num_gpus 4 
 # python convert_tokens.py

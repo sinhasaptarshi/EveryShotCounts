@@ -3,6 +3,7 @@ from functools import partial
 import math
 import random
 from slowfast.models.attention import MultiScaleBlock
+import math 
 
 import numpy as np
 import einops
@@ -43,7 +44,7 @@ class SupervisedMAE(nn.Module):
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False, 
-                 use_precomputed=True):
+                 use_precomputed=True, token_pool_ratio=1.0):
 
         super().__init__()
 
@@ -263,7 +264,8 @@ class SupervisedMAE(nn.Module):
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         # decoder_embed_dim = embed_dim  ## remove if using decode_embed
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
-        self.decoder_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, 6).astype(np.float32)), requires_grad=False)
+        spatial_tokens = math.ceil(token_pool_ratio * 14)
+        self.decoder_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, spatial_tokens).astype(np.float32)), requires_grad=False)
         self.example_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, 14).astype(np.float32)), requires_grad=False)
         # self.decoder_spatial_pos_embed = nn.Parameter(torch.zeros(1, 36, decoder_embed_dim), requires_grad=True)
         trunc_normal_(self.decoder_spatial_pos_embed, std=.02)
@@ -555,6 +557,7 @@ class SupervisedMAE(nn.Module):
             latent = vid
             # print(_)
         t,h,w = thw[0]
+        # print(thw[0])
         x = self.decoder_embed(latent)
         # x = latent
         # x = x + self.decoder_pos_embed
