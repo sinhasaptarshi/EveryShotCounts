@@ -44,7 +44,7 @@ class SupervisedMAE(nn.Module):
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False, 
-                 use_precomputed=True, token_pool_ratio=1.0):
+                 use_precomputed=True, token_pool_ratio=1.0, iterative_shots=False, encodings='swin'):
 
         super().__init__()
 
@@ -85,6 +85,7 @@ class SupervisedMAE(nn.Module):
         if self.use_2d_patch:
             self.patch_stride = [1] + self.patch_stride
         self.input_dims = [temporal_size, spatial_size, spatial_size]
+        self.iterative_shots = iterative_shots
 
         self.patch_embed = stem_helper.PatchEmbed(
             dim_in=in_chans,
@@ -254,8 +255,9 @@ class SupervisedMAE(nn.Module):
 
             self.norm = norm_layer(embed_dim)
 
-
+        
         self.norm = norm_layer(embed_dim)
+        embed_dim = 2048 if encodings=='resnext' else 768
         # --------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------
@@ -264,12 +266,13 @@ class SupervisedMAE(nn.Module):
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         # decoder_embed_dim = embed_dim  ## remove if using decode_embed
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
-        spatial_tokens = math.ceil(token_pool_ratio * 14)
+        spatial_tokens = math.ceil(token_pool_ratio * 14) if encodings == 'mae' else math.ceil(token_pool_ratio * 7)
         self.decoder_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, spatial_tokens).astype(np.float32)), requires_grad=False)
         self.example_spatial_pos_embed = nn.Parameter(torch.from_numpy(get_2d_sincos_pos_embed(decoder_embed_dim, 14).astype(np.float32)), requires_grad=False)
         # self.decoder_spatial_pos_embed = nn.Parameter(torch.zeros(1, 36, decoder_embed_dim), requires_grad=True)
         trunc_normal_(self.decoder_spatial_pos_embed, std=.02)
-        self.shot_token = nn.Parameter(torch.zeros(512))
+        # self.shot_token = nn.Parameter(torch.zeros(1568, embed_dim))
+        self.shot_token = nn.Parameter(torch.zeros(1568, decoder_embed_dim))
 
         # Exemplar encoder with CNN
         # self.decoder_proj1 = nn.Sequential(
@@ -301,7 +304,7 @@ class SupervisedMAE(nn.Module):
 
         
         self.decoder_blocks = nn.ModuleList([
-            CrossAttentionBlock(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer, drop_path=0)
+            CrossAttentionBlock(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer, drop_path=0, iterative_shots=self.iterative_shots)
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
@@ -558,7 +561,9 @@ class SupervisedMAE(nn.Module):
             # print(_)
         t,h,w = thw[0]
         # print(thw[0])
+        # print(latent.shape)
         x = self.decoder_embed(latent)
+        # print(x.shape)
         # x = latent
         # x = x + self.decoder_pos_embed
         # x = x.reshape(x.shape[0], -1, h, w, x.shape[-1])
@@ -607,7 +612,12 @@ class SupervisedMAE(nn.Module):
             y = yi #+ example_pos_embed
             # print(y.shape)
         else:
-            y = self.shot_token.repeat(x.shape[0],1).unsqueeze(0).to(x.device)
+            # y = self.shot_token.repeat(1568, 1).unsqueeze(0).to(x.device)
+            y = self.shot_token.unsqueeze(0).repeat(x.shape[0],1, 1).to(x.device)  ## zero-shot token repeat
+            # y = self.decoder_embed(y)
+            
+
+            # y = self.shot_token.repeat(x.shape[0], 1).to(x.device)
             # print(y.shape)
         
         # y = y.transpose(0,1)
@@ -630,7 +640,7 @@ class SupervisedMAE(nn.Module):
         # y = y.transpose(0,1)
         # print(y.shape)
         for blk in self.decoder_blocks:
-            x = blk(x, y)  ### feature interaction model
+            x = blk(x, y, shot_num=max(shot_num,1))  ### feature interaction model
         x = self.decoder_norm(x)
         # print(x.shape)
         n, thw, c = x.shape

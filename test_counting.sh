@@ -14,4 +14,4 @@ source /jmain02/home/J2AD001/wwp01/shared/home/etc/profile
 conda activate repcount
 
 export WANDB_MODE=offline
-python exemplar_counting_train.py --num_gpus 1 --only_test --trained_model saved_models_repcountfull/epoch_136.pyth --token_pool_ratio 0.4
+python exemplar_counting_train.py --num_gpus 1 --only_test --trained_model saved_models_randomness_batchsize8/epoch_136.pyth --token_pool_ratio 0.4 --get_overlapping_segments True

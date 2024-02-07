@@ -1,12 +1,15 @@
 import torch
 import torch.nn as nn
+torch.cuda.empty_cache()
 import numpy as np
 import os, sys
-# from Rep_count_loader import Rep_count
-from Repcount_balanced_loader import Rep_count
-from Countix_loader import Countix
+from Rep_count_loader import Rep_count
+# from Repcount_balanced_loader import Rep_count
+from Countix_multishot_loader import Countix
+from UCFRep_multishot_loader import UCFRep
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE
+# from video_mae_cross_full_attention import SupervisedMAE
 from video_memae import RepMem
 from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
@@ -34,7 +37,8 @@ def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=200, type=int)
+    parser.add_argument('--epochs', default=300, type=int)
+    parser.add_argument('--encodings', default='swin', type=str, help=['swin','mae'])
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
@@ -43,8 +47,17 @@ def get_args_parser():
                         help='path to a trained model')
     parser.add_argument('--scale_counts', default=100, type=int, help='scaling the counts')
 
-    parser.add_argument('--dataset', default='RepCount', type=str, help='Repcount, Countix')
+    parser.add_argument('--dataset', default='RepCount', type=str, help='Repcount, Countix, UCFRep')
 
+    parser.add_argument('--get_overlapping_segments', default=False, type=bool, help='whether to get overlapping segments')
+
+    parser.add_argument('--peak_at_random_locations', default=False, type=bool, help='whether to have density peaks at random locations')
+
+    parser.add_argument('--multishot', action='store_true')
+
+    parser.add_argument('--iterative_shots', action='store_true', help='will show the examples one by one')
+
+    parser.add_argument('--density_peak_width', default=1.0, type=float, help='sigma for the peak of density maps, lesser sigma gives sharp peaks')
 
 
     # Model parameters
@@ -67,7 +80,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--lr', type=float, default=2e-6, metavar='LR',
+    parser.add_argument('--lr', type=float, default=5e-6, metavar='LR',
                         help='learning rate (peaklr)')
     parser.add_argument('--init_lr', type=float, default=8e-6, metavar='LR',
                         help='learning rate (initial lr)')
@@ -84,7 +97,7 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument('--precomputed', default=True, type=lambda x: (str(x).lower() == 'true'),
                         help='flag to specify if precomputed tokens will be loaded')
-    parser.add_argument('--data_path', default='/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP/', type=str,
+    parser.add_argument('--data_path', default='/raid/local_scratch/sxs63-wwp01/', type=str,
                         help='dataset path')
     parser.add_argument('--tokens_dir', default='saved_tokens_reencoded', type=str,
                         help='ground truth density map directory')
@@ -126,7 +139,7 @@ def get_args_parser():
     parser.add_argument("--use_wandb", default=True, type=lambda x: (str(x).lower() == 'true'))
     parser.add_argument("--wandb", default="counting", type=str)
     parser.add_argument("--team", default="repetition_counting", type=str)
-    parser.add_argument("--wandb_id", default=None, type=str)
+    parser.add_argument("--wandb_id", default='ucfrep_multishot_fullattention', type=str)
     
     parser.add_argument("--token_pool_ratio", default=0.6, type=float)
 
@@ -144,7 +157,9 @@ def main():
     g.manual_seed(args.seed)
     
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
-    
+    if not args.only_test:
+        args.tokens_dir = os.path.join(args.data_path, args.tokens_dir)
+        args.exemplar_dir = os.path.join(args.data_path, args.exemplar_dir)
     
     
     if args.precomputed:
@@ -155,7 +170,10 @@ def main():
                                     density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
-                                    pool_tokens_factor=args.token_pool_ratio)
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot)
             
             dataset_valid = Countix(split="val",
                                     tokens_dir = args.tokens_dir,
@@ -163,14 +181,20 @@ def main():
                                     density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
-                                    pool_tokens_factor=args.token_pool_ratio)
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot)
             dataset_test = Countix(split="test",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
                                     density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
-                                    pool_tokens_factor=args.token_pool_ratio)
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot)
         elif args.dataset == 'RepCount':
             dataset_train = Rep_count(split="train",
                                     tokens_dir = args.tokens_dir,
@@ -178,7 +202,10 @@ def main():
                                     density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
-                                    pool_tokens_factor=args.token_pool_ratio)
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot)
             
             dataset_valid = Rep_count(split="valid",
                                     tokens_dir = args.tokens_dir,
@@ -186,14 +213,58 @@ def main():
                                     density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
-                                    pool_tokens_factor=args.token_pool_ratio)
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot,
+                                    density_peak_width = args.density_peak_width)
             dataset_test = Rep_count(split="test",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
                                     density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
-                                    pool_tokens_factor=args.token_pool_ratio)
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot,
+                                    density_peak_width = args.density_peak_width)
+
+        elif args.dataset == 'UCFRep':
+            dataset_train = UCFRep(split="train",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot)
+            
+            dataset_valid = UCFRep(split="valid",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot,
+                                    density_peak_width = args.density_peak_width)
+            dataset_test = UCFRep(split="test",
+                                    tokens_dir = args.tokens_dir,
+                                    exemplar_dir = args.exemplar_dir,
+                                    density_maps_dir = args.gt_dir,
+                                    select_rand_segment=False, 
+                                    compact=True, 
+                                    pool_tokens_factor=args.token_pool_ratio,
+                                    peak_at_random_location=args.peak_at_random_locations,
+                                    get_overlapping_segments=args.get_overlapping_segments,
+                                    multishot=args.multishot,
+                                    density_peak_width = args.density_peak_width)
+            
         #dataset_test = Rep_count(cfg=cfg,split="test",data_dir=args.data_path)
     
         # Create dict of dataloaders for train and val
@@ -229,7 +300,7 @@ def main():
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     # scaler = NativeScaler()
     
-    model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio).cuda()
+    model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings).cuda()
     #model = RepMem().cuda()
     if args.num_gpus > 1:
         model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
@@ -258,6 +329,9 @@ def main():
     val_step = 0
     if args.only_test:
         model.load_state_dict(torch.load(args.trained_model)['model_state_dict'])
+        videos = []
+        loss = []
+        # model.shot_token.data.fill_(0)
         # model.decoder_spatial_pos_embed.data = torch.from_numpy(get_2d_sincos_pos_embed(512, 8).astype(np.float32)).cuda()
         # model.decoder_blocks[0].attn.wq.reset_parameters()
         # model.decoder_blocks[0].attn.wk.reset_parameters()
@@ -276,19 +350,61 @@ def main():
         bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
         with tqdm(total=len(dataloader),bar_format=bformat,ascii='░▒█') as pbar:
             for i, item in enumerate(dataloader):
-                data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                if args.get_overlapping_segments:
+                    data, data2 = item[0][0], item[0][1]
+                else:
+                    data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                 example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
+                # print(example.shape)
                 density_map = item[2].cuda().type(torch.cuda.FloatTensor).half() * args.scale_counts
                 actual_counts = item[3].cuda() # B x 1
                 video_name = item[4]
+                
+                videos.append(video_name[0])
+
+                
+                shot_num = item[6][0]
+                # print(shot_num)
                 b, n, c = data.shape
+                
                 # print(data.shape)
                 # data_ = data.reshape(b, -1, 36, c)
-                pred = torch.zeros(b, 0).cuda()
+                # pred = torch.zeros(b, 0).cuda()
 
                 thw = item[5]
                 with torch.no_grad():
-                    pred = model(data, example, thw)
+                    if args.get_overlapping_segments:
+                        data = data.cuda().type(torch.cuda.FloatTensor)
+                        # print(data.shape)
+                        data2 = data2.cuda().type(torch.cuda.FloatTensor)
+                        # print(data2.shape)
+                        pred1 = model(data, example, thw, shot_num=shot_num)
+                        pred2 = model(data2, example, thw, shot_num=shot_num)
+                        if pred1.shape != pred2.shape:
+                            pred2 = torch.cat([torch.zeros(1, 4).cuda(), pred2], 1)
+                        else:
+                            print('equal')
+                        pred = (pred1 + pred2) / 2
+                    else:
+                        # print(shot_num)
+                        pred = model(data, example, thw, shot_num=shot_num)
+
+                    # for i in range(pred.shape[0]):
+                    # num_segments = pred.shape[1] // 8
+                    # total_dur = 8 + 2 * (num_segments - 1)
+                    # freq = torch.zeros(total_dur).cuda()
+                    # pred_density_map = torch.zeros(total_dur).cuda()
+                    # for j in range((total_dur-8)//2):
+                    #     freq[2*j: 2*j + 8] += 1
+                    #     pred_density_map[2*j : 2*j + 8] += pred[0][8*j:8*j + 8]
+                    # pred_density_map = pred_density_map / freq
+                    # pred = pred_density_map.unsqueeze(0)
+
+
+                    # # pred[i] = density_map
+                    # del pred_density_map
+                    # del freq
+
                     # for i in range(0, data_.shape[1], 48):
                     #     data = data_[:, i: min(i+48, data.shape[1])]
                     #     k = data.shape[1]
@@ -302,30 +418,33 @@ def main():
                     # y = torch.nn.functional.relu(y)
                 # print(video_name[0])
                 mse = ((pred - density_map)**2).mean(-1)
-                np.savez('repcount_density_maps/'+video_name[0]+'_preds.npz', pred[0].cpu().numpy())
-                np.savez('repcount_density_maps/'+video_name[0]+'_gt.npz', density_map[0].cpu().numpy())
+                np.savez('countix_density_maps_peaks1.0/'+video_name[0]+'_preds_0shot.npz', pred[0].cpu().numpy())
+                np.savez('countix_density_maps_peaks1.0/'+video_name[0]+'_gt.npz', density_map[0].cpu().numpy())
                 predict_counts = torch.sum(pred, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts
                 predictions.extend(predict_counts.detach().cpu().numpy())
                 gt_counts.extend(actual_counts.detach().cpu().numpy())
                 mae = torch.div(torch.abs(predict_counts - actual_counts), actual_counts + 1e-1)
                 predict_mae.extend(mae.cpu().numpy())
                 predict_mse.extend(np.sqrt(mse.cpu().numpy()))
+                loss.append(mse.cpu().numpy())
                 clips.append(data.shape[1]//(8*9*9))
                 # print(predict_mae)
-
+        print(videos)
         predict_mae = np.array(predict_mae)
         predictions = np.array(predictions)
         gt_counts = np.array(gt_counts)
         predict_mse = np.array(predict_mse)
-        # df = pd.read_csv('datasets/repcount/validtest_with_fps.csv')
-        # df['loss'] = predict_mse
-        # df.to_csv('datasets/repcount/validtest_with_fps.csv')
+        videos = pd.DataFrame(videos, columns=['name'])
+        loss = pd.DataFrame(loss, columns=['0shot_loss'])
+        df = pd.concat([videos, loss], axis=1)
+        df.to_csv('countix_results_1.csv')
         clips = np.array(clips)
         min_ = clips.min()
         max_ = clips.max()
 
         print(gt_counts)
-        diff = np.abs(predictions - gt_counts)
+        print(predictions.round())
+        diff = np.abs(predictions.round() - gt_counts)
         diff_z = np.abs(predictions.round() - gt_counts.round())
         print(f'Overall MAE: {predict_mae.mean()}')
         print(f'OBO: {(diff<=1).sum()/ len(diff)}')
@@ -353,7 +472,7 @@ def main():
     param_groups = optim_factory.add_weight_decay(model, args.weight_decay)
     # optimizer = torch.optim.AdamW(model.parameters(), lr=args.init_lr, betas=(0.9, 0.95))
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
-    milestones = [i for i in range(0, args.epochs, 40)]
+    milestones = [i for i in range(0, args.epochs, 60)]
     # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.8)
     lossMSE = nn.MSELoss().cuda()
@@ -361,7 +480,9 @@ def main():
     best_loss = np.inf
 
     os.makedirs(args.save_path, exist_ok=True)
+    # wandb_run.watch(model, log='gradients')
     for epoch in range(args.epochs):
+        torch.cuda.empty_cache()
         # if epoch <= args.warmup_epochs:
         #     lr = args.init_lr + ((args.peak_lr - args.init_lr) *  epoch / args.warmup_epochs)  ### linear warmup
         # else:
@@ -409,16 +530,55 @@ def main():
                         elif phase == 'val':
                             val_step+=1
                         with torch.cuda.amp.autocast(enabled=True):
+                            # if args.get_overlapping_segments:
+                            #     data, data2 = item[0][0], item[0][1]
+                            # else:
                             data = item[0].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             # print(data.shape)
                             example = item[1].cuda().type(torch.cuda.FloatTensor) # B x (THW) x C
                             density_map = item[2].cuda().type(torch.cuda.FloatTensor).half() * args.scale_counts
-                            actual_counts = item[3].cpu() # B x 1
+                            actual_counts = item[3].cuda() # B x 1
                             thw = item[5]
+                            shot_num = item[6][0]
                             # print(actual_counts)
-            
                             
-                            y = model(data, example, thw)
+                            # if args.get_overlapping_segments:
+                            #     # padding = data.shape[1] - data2.shape[1]
+                            #     # data2 = torch.cat([data2, torch.zeros(data.shape[0], padding, data2.shape[-1])], 1)
+                            #     # data = torch.cat([data, data2])
+                            #     data = data.cuda().type(torch.cuda.FloatTensor)
+                            #     # data = data.repeat(2,1,1)
+                            #     # example = example.repeat(2,1,1)
+                            #     # print(example.shape)
+                            #     # data2 = data2.cuda().type(torch.cuda.FloatTensor)
+                            #     # pred2 = model(data2, example, thw)
+                            #     # del data2
+                            #     # data = data.cuda().type(torch.cuda.FloatTensor)
+                            #     b,n,c = data.shape
+                            #     # data2 = data2.cuda().type(torch.cuda.FloatTensor)
+                            #     # pred1 = model(data, example, thw)
+                            #     # pred = model(data, example, thw)
+                            #     y = model(data, example, thw)
+                            #     # del data
+                            #     # pred1 = pred[0]
+                            #     # if padding != 0:
+                            #     #     pred2 = pred[1][:-(padding//(thw[0][-1] * thw[0][-2]))]
+                            #     # else:
+                            #     #     pred2 = pred[1]
+                            #     # print(pred1.shape)
+                            #     # print(pred2.shape)
+                            #     # if pred1.shape != pred2.shape:
+                            #     #     pred2 = torch.cat([torch.zeros(abs(len(pred1) - len(pred2))).cuda(), pred2])
+                            #     # if pred1.shape[1] - pred2.shape[1] == 2:
+                            #     #     print(pred1.shape)
+                            #     #     print(pred2.shape)
+                            #     # y = (pred1[0] + pred1[1]) / 2
+                            #     # y = y.unsqueeze(0)
+                            #     # y = (pred1 + pred2) / 2
+                            #     # y = y.unsqueeze(0)
+                            # else:
+                            b,n,c = data.shape
+                            y = model(data, example, thw, shot_num=shot_num)
                             # y = torch.nn.functional.relu(y)
                             if phase == 'train':
                                 mask = np.random.binomial(n=1, p=0.8, size=[1,density_map.shape[1]])
@@ -432,12 +592,14 @@ def main():
                             loss = ((y - density_map) ** 2) #+ (0.2 * (y / args.scale_counts).abs()) 
                             counts = density_map.sum(1, keepdims=True) / args.scale_counts
                             counts[counts == 0] = 1
-                            # loss = (loss * masks / counts / density_map.shape[1]).sum() / density_map.shape[0]
+                            # loss = (loss * masks / counts / density_map.shape[1]).sum() / density_map.shape[0]   ## normalized by counts
                             loss = ((loss * masks) / density_map.shape[1]).sum() / density_map.shape[0]  ### normalized by duration
                             # loss = (loss * masks).sum() / density_map.shape[0]  ###non-normalized
                             
                             #print(item[4],data.shape,y.shape,density_map.shape)
-                            predict_count = torch.sum(y, dim=1).type(torch.FloatTensor).cpu() / args.scale_counts # sum density map
+                            predict_count = torch.sum(y, dim=1).type(torch.cuda.FloatTensor) / args.scale_counts # sum density map
+                            loss_mae = torch.mean(torch.abs(predict_count - actual_counts)/actual_counts)
+                            loss_mse = torch.mean((predict_count - actual_counts)**2)
                             # print(predict_count)
                             if phase == 'val':
                                 ground_truth.append(actual_counts.detach().cpu().numpy())
@@ -449,7 +611,7 @@ def main():
                             loss3 = torch.sum(torch.div(torch.abs(predict_count - actual_counts), actual_counts + 1e-1)) / \
                             predict_count.flatten().shape[0]    #### reduce the mean absolute error
                             # loss1 = lossMSE(y, density_map) 
-                            loss1 = loss
+                            # loss1 = loss
                             
                             # if args.use_mae:
                             #     loss = loss1 + loss3
@@ -459,29 +621,30 @@ def main():
                             #     loss3 = 0 # Set to 0 for clearer logging
                             # loss = loss1
                             if phase=='train':
-                                loss1 = loss / args.accum_iter
+                                # loss1 = loss / args.accum_iter
+                                loss1 = (loss + 10 * loss_mae) / args.accum_iter
                                 # loss1 = loss
                                 # scaler(loss, optimizer, parameters=model.parameters(), update_grad=(i + 1) % args.accum_iter == 0)
 
-                                scaler.scale(loss1).backward()
-                                # loss1.backward()
+                                # scaler.scale(loss1).backward()
+                                loss1.backward()
                                 if (i + 1) % args.accum_iter == 0: ### accumulate gradient
-                                    scaler.step(optimizer)
-                                    scaler.update()
-                                    # optimizer.step()
+                                    # scaler.step(optimizer)
+                                    # scaler.update()
+                                    optimizer.step()
                                     optimizer.zero_grad()
                                     torch.cuda.empty_cache()
                             
                             epoch_loss = loss.item()
-                            count += data.shape[0]
-                            total_loss_all += loss.item() * data.shape[0]
-                            total_loss1 += loss.item() * data.shape[0]
-                            total_loss2 += loss2 * data.shape[0]
-                            total_loss3 += loss3.item() * data.shape[0]
+                            count += b
+                            total_loss_all += loss.item() * b
+                            total_loss1 += loss.item() * b
+                            total_loss2 += loss2.item() * b
+                            total_loss3 += loss3.item() * b
                             # actual_counts = actual_counts / 60
                             # predict_count = predict_count / 60
                             off_by_zero += (torch.abs(actual_counts.round() - predict_count.round()) ==0).sum().item()  ## off by zero
-                            off_by_one += (torch.abs(actual_counts - predict_count) <=1 ).sum().item()   ## off by one
+                            off_by_one += (torch.abs(actual_counts.round() - predict_count.round()) <=1 ).sum().item()   ## off by one
                             mse += ((actual_counts - predict_count)**2).sum().item()
                             mae += torch.sum(torch.div(torch.abs(predict_count - actual_counts), (actual_counts) + 1e-1)).item()
                             
