@@ -44,3 +44,7 @@ saved_models_nonormalizationbycounts/
 */*.pyth
 countix/
 countix_full/
+node_modules
+selected_videos/
+QUVARepetitionDataset.tar.gz
+QUVARepetitionDataset/

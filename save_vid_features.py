@@ -6,6 +6,7 @@ import pandas as pd
 
 from Rep_count import Rep_count
 from Countix import Countix
+from UCF_Rep import UCFRep
 from video_mae_cross import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
@@ -23,7 +24,7 @@ def get_args_parser():
     return parser
 
 def save_exemplar(dataloaders, model):
-    for split in ['train', 'val', 'test']:
+    for split in ['train', 'val']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             # print(video.shape)
@@ -34,7 +35,7 @@ def save_exemplar(dataloaders, model):
             ends = item[-2]
             video_name = item[-1][0]
             print(video_name)
-            if os.path.exists('exemplar_tokens_countix/{}_new.npz'.format(video_name)):
+            if os.path.exists('exemplar_tokens_ucfrep/{}_new.npz'.format(video_name)):
                 continue
             C, T, H, W = video.shape
 
@@ -85,18 +86,18 @@ def save_exemplar(dataloaders, model):
             del encoded, data
             torch.cuda.empty_cache()
             
-            if not os.path.isdir(f'exemplar_tokens_countix'):
-                os.makedirs(f'exemplar_tokens_countix')
+            if not os.path.isdir(f'exemplar_tokens_ucfrep'):
+                os.makedirs(f'exemplar_tokens_ucfrep')
                 
-            np.savez('exemplar_tokens_countix/{}_new.npz'.format(video_name), enc_np)
+            np.savez('exemplar_tokens_ucfrep/{}_new.npz'.format(video_name), enc_np)
 
 def save_tokens(dataloaders, model):
-    for split in ['val']:
+    for split in ['train', 'val']:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
             print(video_name)
-            if os.path.exists('saved_tokens_countix/{}_new.npz'.format(video_name)):
+            if os.path.exists('saved_tokens_ucfrep/{}.npz'.format(video_name)):
                 continue
             # if video_name != 'stu8_4.mp4':
             #     pass
@@ -122,11 +123,11 @@ def save_tokens(dataloaders, model):
             del encoded, data
             torch.cuda.empty_cache()
             
-            if not os.path.isdir(f'saved_tokens_countix'):
+            if not os.path.isdir(f'saved_tokens_ucfrep'):
                 print('Creating folder')
-                os.makedirs(f'saved_tokens_countix')
+                os.makedirs(f'saved_tokens_ucfrep')
             
-            np.savez('saved_tokens_countix/{}.npz'.format(video_name), enc_np)
+            np.savez('saved_tokens_ucfrep/{}.npz'.format(video_name), enc_np)
 
 
 def main():

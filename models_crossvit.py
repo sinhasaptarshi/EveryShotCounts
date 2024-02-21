@@ -140,7 +140,7 @@ class CrossAttentionBlock(nn.Module):
 
     def __init__(
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, iterative_shots=False, no_exemplars=False):
         super().__init__()
         
         self.norm0 = norm_layer(dim)
@@ -157,11 +157,57 @@ class CrossAttentionBlock(nn.Module):
         self.norm2 = norm_layer(dim)
         self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
         self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.iterative_shots = iterative_shots
+        self.no_exemplars = no_exemplars
 
-    def forward(self, x, y):
+    def forward(self, x, y, shot_num=1):
         x = x + self.drop_path0(self.selfattn(self.norm0(x)))
         # y = y + self.drop_path0(self.selfattn(self.norm0(y)))
-        x = x + self.drop_path1(self.attn(self.norm1(x), y))
+        if not self.no_exemplars:
+            x_few = []
+            if self.iterative_shots:
+                # print(shot_num)
+                for i in range(shot_num): #running iterations over shots
+                    nt = y.shape[1] // shot_num   ##number of example tokens per example
+                    yi = y[:, (i*nt):((i+1)*nt)]  ##separating example tokens
+                    # print(i, yi.shape)
+                    # xi = x + self.drop_path1(self.attn(self.norm1(x), yi)) ### cross attention between x and each example
+                    xi = self.drop_path1(self.attn(self.norm1(x), yi))
+                    x_few.append(xi)   
+                x = x + torch.stack(x_few).mean(0)
+                # x = torch.stack(x_few).mean(0)
+            else:
+                x = x + self.drop_path1(self.attn(self.norm1(x), y))
+            
         # x = self.drop_path1(self.attn(self.norm1(x), y))
         x = x + self.drop_path2(self.mlp(self.norm2(x)))
+        return x
+
+
+class SelfAttentionBlock(nn.Module):
+
+    def __init__(
+            self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        
+        self.norm0 = norm_layer(dim)
+        self.selfattn = Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        self.drop_path0 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        
+        self.norm1 = norm_layer(dim)
+        # self.attn = CrossAttention(
+        #     dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+        # self.norm2 = norm_layer(dim)
+        self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
+        # self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        # self.iterative_shots = iterative_shots
+
+    def forward(self, x):
+        x = self.drop_path0(self.selfattn(self.norm0(x)))
+        x = self.drop_path1(self.mlp(self.norm1(x)))
         return x

@@ -25,7 +25,11 @@ class Rep_count(torch.utils.data.Dataset):
                  select_rand_segment=True,
                  compact=False,
                  lim_constraint=np.inf,
-                 pool_tokens_factor=1.0):
+                 pool_tokens_factor=1.0,
+                 peak_at_random_location=False,
+                 get_overlapping_segments=False,
+                 multishot=True,
+                 density_peak_width=1.0):
         
         self.num_frames=num_frames
         self.lim_constraint = lim_constraint
@@ -37,14 +41,18 @@ class Rep_count(torch.utils.data.Dataset):
         self.pool_tokens = pool_tokens_factor
         self.split = split # set the split to load
         self.add_noise = add_noise # add noise to frames (augmentation)
-        # if self.split == 'train':
-        #     # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
-        #     # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
-        #     # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
-        #     csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
-        # else:
-        #     csv_path = f"datasets/repcount/test_with_fps.csv"
-        csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
+        self.peak_at_random_location = peak_at_random_location
+        self.get_overlapping_segments = get_overlapping_segments
+        self.multishot = multishot
+        self.density_peak_width = density_peak_width
+        if self.split == 'train':
+            # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
+            # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
+            # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
+            csv_path = f"datasets/repcount/train_with_fps.csv"
+        else:
+            csv_path = f"datasets/repcount/test_with_fps.csv"
+        # csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
         self.df['density_map_sum'] = 0
         self.df = self.df[self.df['count'].notna()]
@@ -88,7 +96,7 @@ class Rep_count(torch.utils.data.Dataset):
         return y_label
     
         
-    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=np.inf, id=None, cycle_start_id=0, count=None):
+    def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=np.inf, id=None, cycle_start_id=0, count=None, shot_num=1, get_overlapping_segments=False, segment_id=0):
         try:
             tokens = np.load(path)['arr_0'] # Load in format C x t x h x w
         except:
@@ -97,55 +105,139 @@ class Rep_count(torch.utils.data.Dataset):
 
             
         if is_exemplar:
+            if shot_num == 0:
+                shot_num = 1
             if count is not None:
-                N = round(count)
+                if count > 0.6:
+                    N = round(count)
+                else:
+                    N = 1
             else:
                 N = tokens.shape[0]
             if self.select_rand_segment or self.split == 'train':
                 # print(N)
-                idx = cycle_start_id + np.random.randint(N)
+                shot_num = min(shot_num, N)
+                
+                idx = cycle_start_id + np.random.choice(np.arange(N), size=shot_num, replace=False)
+                # idx = cycle_start_id + np.random.randint(N - shot_num + 1, size=shot_num)
                 # print(idx)
                 # idx = 0
-                # shot_num = min(np.random.randint(1,3), N)
-                shot_num = 1
+                
+                # shot_num = 1
             else:
                 
-                idx = id if id is not None else 0
+                # idx = [id] if id is not None else [0]
                 
                 # shot_num = min(1, N)
-                shot_num = 1
+                # shot_num = 1
+                shot_num = min(shot_num, N)
+                idx = np.arange(shot_num)
+                # idx = np.linspace(0,N,shot_num+1)[:shot_num].astype(int)
+                # print(shot_num)
                 # if id is not None:
                 #     # idx = np.random.randint(N)
                 #     idx = 0
                 # else:
                 #     idx = 0
+            # print(idx)
+            new_tokens = []
+            for id in idx:
+                new_tokens.append(tokens[id])
+            tokens = np.stack(new_tokens)
 
-            tokens = tokens[idx:idx+shot_num] ### return the encoding for a selected example per video instance
+
+            # tokens = tokens[idx:idx+shot_num] ### return the encoding for a selected example per video instance
             # print(tokens.shape)
             if tokens.shape[0] == 0:
                 print(path)
             tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
+            tokens = torch.from_numpy(tokens)
+            # if count is not None:
+            #     N = round(count)
+            # else:
+            #     N = tokens.shape[0]
+            # if self.select_rand_segment or self.split == 'train':
+            #     # print(N)
+            #     idx = cycle_start_id + np.random.randint(N)
+            #     # print(idx)
+            #     # idx = 0
+            #     # shot_num = min(np.random.randint(1,3), N)
+            #     shot_num = 1
+            # else:
+                
+            #     idx = id if id is not None else 0
+                
+            #     # shot_num = min(1, N)
+            #     shot_num = 1
+            #     # if id is not None:
+            #     #     # idx = np.random.randint(N)
+            #     #     idx = 0
+            #     # else:
+            #     #     idx = 0
+
+            # tokens = tokens[idx:idx+shot_num] ### return the encoding for a selected example per video instance
+            # # print(tokens.shape)
+            # if tokens.shape[0] == 0:
+            #     print(path)
+            # tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
             # tokens = np.random.rand(tokens.shape[0], tokens.shape[1], tokens.shape[2], tokens.shape[3])
         else:
+            # print(segment_id)
             if bounds is not None:
                 low_bound = bounds[0]//8
                 # up_bound = bounds[1]//8 
                 up_bound = min(math.ceil(bounds[1]/8), lim_constraint)
+            if get_overlapping_segments:
+                if self.split != 'test':
+                    tokens1 = tokens[segment_id::4]
+                    tokens1 = einops.rearrange(tokens1,'S C T H W -> C (S T) H W')
+                    tokens1 = tokens1[:, max(low_bound-(2*segment_id), 0):max(up_bound-(2*segment_id), 0)]
+                    tokens1 = torch.from_numpy(tokens1)
+                    # print(tokens1.shape)
+                    tokens2 = None
+                else:
+                    tokens1 = tokens[0::4]
+                    tokens2 = tokens[2::4]
+                
+                    tokens1 = einops.rearrange(tokens1,'S C T H W -> C (S T) H W')
+                    tokens2 = einops.rearrange(tokens2,'S C T H W -> C (S T) H W')
+                    # print(low_bound)
+                    tokens1 = tokens1[:, low_bound:up_bound]
+                    tokens2 = tokens2[:, max(low_bound-4, 0) : max(up_bound-4, 0)]
+                    # if tokens2.shape[1] == 0:
+                    #     tokens2 = tokens1  ### incase we get empty tokens
+                    # print(tokens1.shape)
+                    # print(tokens2.shape)
+                    tokens1 = torch.from_numpy(tokens1)
+                    tokens2 = torch.from_numpy(tokens2)
+                # if segment_id == 1:
+                #     tokens1 = tokens2
+                if self.pool_tokens < 1.0 and not is_exemplar:
+                    factor = math.ceil(tokens.shape[-1] * self.pool_tokens)
+                    tokens1 = torch.nn.functional.adaptive_avg_pool3d(tokens1, (tokens1.shape[-3], factor, factor))
+                    if tokens2 is not None:
+                        tokens2 = torch.nn.functional.adaptive_avg_pool3d(tokens2, (tokens2.shape[-3], factor, factor))
+                if self.split != 'test':
+                    tokens = tokens1
+                else:
+                    tokens = (tokens1, tokens2)
+                
             # else:
             #     low_bound = 0
             #     up_bound = None
             
             # print(tokens.shape[0])
-            tokens = tokens[0::4] # non overlapping segments
-            tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
-            tokens = tokens[:, low_bound:up_bound]
-            # tokens = tokens[low_bound:min(up_bound, low_bound+lim_constraint)] ## non overlapping segments
-                
-        
-        tokens = torch.from_numpy(tokens)
-        if self.pool_tokens < 1.0 and not is_exemplar:
-            factor = math.ceil(tokens.shape[-1] * self.pool_tokens)
-            tokens = torch.nn.functional.adaptive_avg_pool3d(tokens, (tokens.shape[-3], factor, factor))
+            else:
+                tokens = tokens[0::4] # non overlapping segments
+                tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
+                tokens = tokens[:, low_bound:up_bound]
+                # tokens = tokens[low_bound:min(up_bound, low_bound+lim_constraint)] ## non overlapping segments
+                    
+            
+                tokens = torch.from_numpy(tokens)
+                if self.pool_tokens < 1.0:
+                    factor = math.ceil(tokens.shape[-1] * self.pool_tokens)
+                    tokens = torch.nn.functional.adaptive_avg_pool3d(tokens, (tokens.shape[-3], factor, factor))
             
         # tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
         
@@ -153,7 +245,10 @@ class Rep_count(torch.utils.data.Dataset):
         #     start = bounds[0] // 8 ## Sampling every 4 frames and MViT temporally downsample T=16 -> 8 
         #     end = bounds[1] // 8
         #     tokens = tokens[:,start:end,:,:]
-        return tokens
+        if is_exemplar:
+            return tokens, shot_num
+        else:
+            return tokens
 
     def preprocess(self, video_frame_length, time_points, num_frames):
         """
@@ -191,6 +286,10 @@ class Rep_count(torch.utils.data.Dataset):
     def __getitem__(self, index):
         video_name = self.df.iloc[index]['name'].replace('.mp4', '.npz')
         row = self.df.iloc[index]
+        if self.get_overlapping_segments and self.split=='train':
+            segment_id = np.random.randint(4)
+        else:
+            segment_id = 0
         cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not math.isnan(row[key])]
         try:
             cycle_start_id = row['cycle_start_id']
@@ -201,6 +300,14 @@ class Rep_count(torch.utils.data.Dataset):
             lim_constraint = 150
         else:
             lim_constraint = np.inf
+
+        if self.multishot:
+            if self.split == 'train':
+                shot_num_ = np.random.randint(0,3)  ### number of examples
+            else:
+                shot_num_ = 0
+        else:
+            shot_num_ = 1
         
         
         # if self.split in ['val', 'test']:
@@ -217,8 +324,8 @@ class Rep_count(torch.utils.data.Dataset):
         # --- Alternate density map loading ---
         # density_map = self.preprocess(num_frames, cycle, num_frames)
         frame_ids = np.arange(num_frames)
-        low = (segment_start // 8) * 8
-        up = min(math.ceil(segment_end / 8 ), lim_constraint) * 8
+        low = ((segment_start // 8) + (segment_id * 2)) * 8
+        up = (min(math.ceil(segment_end / 8 ), lim_constraint))* 8
         # density_map = np.array(density_map[low: up])
         select_frame_ids = frame_ids[low:up][0::8]
         density_map_alt = np.zeros(len(select_frame_ids))
@@ -235,7 +342,7 @@ class Rep_count(torch.utils.data.Dataset):
                 density_map_alt[mid] = 1
         # print(density_map_alt.sum())
         # gt_density = density_map_alt
-        gt_density = ndimage.gaussian_filter1d(density_map_alt, sigma=1, order=0)
+        gt_density = ndimage.gaussian_filter1d(density_map_alt, sigma=self.density_peak_width, order=0)
         count = gt_density.sum()
         # print(count)
         
@@ -254,12 +361,15 @@ class Rep_count(torch.utils.data.Dataset):
         durations = durations.astype(np.float32)
         durations[durations == 0] = 0
         select_exemplar = durations.argmax()
-        examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
+        examplar_path = f"{self.exemplar_dir}/{video_name}"
+        # examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
         # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '_new.npz')}"
         if self.split == 'train':
-            example_rep = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=min(actual_counts,6)) 
+            example_rep, shot_num = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=min(actual_counts,24), shot_num=shot_num_) 
         else:
-            example_rep = self.load_tokens(examplar_path,True, id = None, count=actual_counts) 
+            example_rep, shot_num = self.load_tokens(examplar_path,True, id = None, count=actual_counts, shot_num=shot_num_)
+        if shot_num_ == 0:
+            shot_num = 0
         if example_rep.shape[1] == 0:
             print(row)
         # example_rep = self.load_tokens(examplar_path, True)
@@ -273,7 +383,7 @@ class Rep_count(torch.utils.data.Dataset):
         # --- Video tokens loading ---
         # video_path = f"{self.tokens_dir}/{self.split}/{video_name}"
         video_path = f"{self.tokens_dir}/{video_name}"
-        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end), lim_constraint=lim_constraint) ###lim_constraint for memory issues
+        vid_tokens = self.load_tokens(video_path,False, (segment_start,segment_end), lim_constraint=lim_constraint, segment_id=segment_id, get_overlapping_segments=self.get_overlapping_segments) ###lim_constraint for memory issues
         
         # self.df['density_map_sum'].iloc[index] = gt_density.sum()
 
@@ -282,7 +392,7 @@ class Rep_count(torch.utils.data.Dataset):
             gt_density = torch.from_numpy(gt_density).half() 
             # if row['count'] > gt_density.sum():
             #     print(row['count'],gt_density.sum(),self.df.iloc[index]['name'][:-4])
-            return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4], list(vid_tokens.shape[-3:]) 
+            return vid_tokens, example_rep, gt_density, gt_density.sum(), self.df.iloc[index]['name'][:-4], list(vid_tokens[0].shape[-3:]), shot_num 
         
         T = row['num_frames'] ### number of frames in the video
         if T <= self.num_frames:
@@ -300,7 +410,7 @@ class Rep_count(torch.utils.data.Dataset):
         gt = gt_density[(start//4): (end//4)]
         # print(gt.sum())
 
-        return sampled_segments, example_rep, gt, gt.sum(), self.df.iloc[index]['name'][:-4], thw
+        return sampled_segments, example_rep, gt, gt.sum(), self.df.iloc[index]['name'][:-4], thw, shot_num
         
 
     def __len__(self):
@@ -310,12 +420,23 @@ class Rep_count(torch.utils.data.Dataset):
     def collate_fn(self, batch):
         from torch.nn.utils.rnn import pad_sequence
         
-        # [1 x T1 x .... ], [1 x T2 x ....] => [2 x T2 x ....] (T2 > T1)    
-        vids = pad_sequence([einops.rearrange(x[0],'C T H W -> T C H W') for x in batch])
-        if self.compact:
-            vids = einops.rearrange(vids, 'T B C H W -> B (T H W) C')
+        # [1 x T1 x .... ], [1 x T2 x ....] => [2 x T2 x ....] (T2 > T1) 
+        if len(batch[0][0]) == 2:
+            vids = pad_sequence([einops.rearrange(x[0][0],'C T H W -> T C H W') for x in batch])
+            vids1 = pad_sequence([einops.rearrange(x[0][1],'C T H W -> T C H W') for x in batch])
+            if self.compact:
+                vids = einops.rearrange(vids, 'T B C H W -> B (T H W) C')
+                vids1 = einops.rearrange(vids1, 'T B C H W -> B (T H W) C')
+            else:
+                vids = einops.rearrange(vids, 'T B C H W -> B C T H W')
+                vids1 = einops.rearrange(vids1, 'T B C H W -> B C T H W')
+            vids = (vids, vids1)
         else:
-            vids = einops.rearrange(vids, 'T B C H W -> B C T H W')
+            vids = pad_sequence([einops.rearrange(x[0],'C T H W -> T C H W') for x in batch])
+            if self.compact:
+                vids = einops.rearrange(vids, 'T B C H W -> B (T H W) C')
+            else:
+                vids = einops.rearrange(vids, 'T B C H W -> B C T H W')
         # min_examplars = min([x[1].shape[1] for x in batch])
         # exemplars = torch.stack([x[1][:, :min_examplars] for x in batch]).squeeze(1)
         exemplars = torch.stack([x[1] for x in batch]).squeeze(1)
@@ -325,15 +446,16 @@ class Rep_count(torch.utils.data.Dataset):
         gt_density_sum =  torch.tensor([x[3] for x in batch], dtype=torch.float)
         names = [x[4] for x in batch]
         thw = [x[5] for x in batch]
+        shot_num = [x[6] for x in batch]
         
         # return padded video, exemplar, padded density map,
-        return vids, exemplars, gt_density, gt_density_sum, names, thw
+        return vids, exemplars, gt_density, gt_density_sum, names, thw, shot_num
 
 
 ## testing
 if __name__=='__main__':
     from tqdm import tqdm
-    dat = Rep_count(select_rand_segment=False, compact=False, pool_tokens_factor=0.5)
+    dat = Rep_count(select_rand_segment=False, compact=False, pool_tokens_factor=0.5, get_overlapping_segments=False)
     print('--- dataset created ---')
     device = torch.device("cpu")
     print(f'Device: {device}')
@@ -358,7 +480,7 @@ if __name__=='__main__':
     fps = []
     
     for i, item in enumerate(tqdm(dataloader)):
-        print(f"It. {i} \n vid tokens: {item[0].shape} \n exem tokens: {item[1].shape} \n density map: {item[2].shape}:{item[3]} \n \n")
+        print(f"It. {i} \n vid tokens: {item[0][0].shape} \n exem tokens: {item[1].shape} \n density map: {item[2].shape}:{item[3]} \n \n")
         density_map_sum.append(item[3][0].item())
         #if int(item[3].item())!=int(item[5].item()):
         #    print(item[3].item(),int(item[5].item()))
