@@ -16,7 +16,7 @@ import einops
 
 class Rep_count(torch.utils.data.Dataset):
     def __init__(self,
-                 split="train",
+                 split="test",
                  add_noise= False,
                  num_frames=512,
                  tokens_dir = "saved_tokens_reencoded",

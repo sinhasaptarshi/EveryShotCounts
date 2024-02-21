@@ -384,14 +384,14 @@ class UCFRep(torch.utils.data.Dataset):
         if exemplar is not None:
             exemplar = self.transform_exemplar(exemplar/255) 
         
+
         # starts = starts - start_frame
         # ends = ends - start_frame
-        #print(f"frame ids: [{frame_idx[0]},{frame_idx[-1]}] | frames: {frame_idx[-1]-frame_idx[0]}/{duration} [{(frame_idx[-1]-frame_idx[0])/duration:.2f}] | reps: {count}/{len(starts)} [{count/len(starts):.2f}]")
         
         return vid, gt_density, count, starts, ends, self.df.iloc[index]['name'].split('/')[-1][:-4]#, segment_start, segment_end
-            
 
-    def __len__(self):
+        starts = starts - start_frame
+        ends = ends - start_frame
         return len(self.df)
 
 
