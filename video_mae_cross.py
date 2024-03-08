@@ -162,14 +162,14 @@ class SupervisedMAE(nn.Module):
 
 
         # self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim), requires_grad=False)  # fixed sin-cos embedding
-
-        if not self.use_precomputed or self.finetune_encoder:
-            if self.encodings == 'resnext':
-                self.blocks = resnext.resnet101(num_classes=101, sample_size=224, sample_duration=64, last_fc=False)
-            elif self.encodings == 'mae':
-                self.blocks = nn.ModuleList([
-                    Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
-                    for i in range(depth)]) 
+        print(depth)
+        # if not self.use_precomputed: #or self.finetune_encoder:
+        #     if self.encodings == 'resnext':
+        #         self.blocks = resnext.resnet101(num_classes=101, sample_size=224, sample_duration=64, last_fc=False)
+        #     elif self.encodings == 'mae':
+        #         self.blocks = nn.ModuleList([
+        #             Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+        #             for i in range(depth)]) 
         
         if self.cls_embed_on:
             self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -205,7 +205,7 @@ class SupervisedMAE(nn.Module):
 
  
         
-        # self.blocks = nn.ModuleList()
+        self.blocks = nn.ModuleList()
 
         for i in range(depth):
             num_heads = round_width(num_heads, head_mul[i])
@@ -249,7 +249,7 @@ class SupervisedMAE(nn.Module):
             if cfg.MODEL.ACT_CHECKPOINT:
                 attention_block = checkpoint_wrapper(attention_block)
             
-            if not self.use_precomputed or self.finetune_encoder:
+            if not self.use_precomputed:# or self.finetune_encoder:
                 if self.encodings == 'mae':
                     self.blocks.append(attention_block)
                     if len(stride_q[i]) > 0:
@@ -561,15 +561,15 @@ class SupervisedMAE(nn.Module):
         # if boxes.nelement() > 0:
         #     torchvision.utils.save_image(boxes[0], f"data/out/crops/box_{time.time()}_{random.randint(0, 99999):>5}.png")
         y1 = []
-        if not self.use_precomputed and self.finetune_encoder:
-            if self.encodings == 'mae':
+        if not self.use_precomputed: #and not self.finetune_encoder:
+            # if self.encodings == 'mae':
                 with torch.no_grad():
                     latent, thw = self._mae_forward_encoder(vid)  ##temporal dimension preserved 1568 tokens
                     latent = latent[:, 1:]
                     if self.just_encode:
                         return latent, torch.tensor(thw).to(latent.device)
-            elif self.encodings == 'resnext':
-                latent, thw = self.forward_resnext_encoder(vid)
+            # elif self.encodings == 'resnext':
+            #     latent, thw = self.forward_resnext_encoder(vid)
         else:
             latent = vid
             # print(_)

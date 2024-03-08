@@ -26,10 +26,11 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--num_gpus', default=4, type=int)
-    parser.add_argument('--pretrained_encoder', default ='pretrained_models/pretrained.pyth', type=str)
+    parser.add_argument('--pretrained_encoder', default ='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
     parser.add_argument('--save_exemplar_encodings', default=False, type=bool)
     parser.add_argument('--dataset', default='Repcount', help='choose from [Repcount, Countix, UCFRep]', type=str)
     parser.add_argument('--model', default='VideoMAE', help="VideoMAE, VideoSwin")
+    parser.add_argument('--encodings', default='mae', help="mae, swin, resnext")
     return parser
 
 def save_exemplar(dataloaders, model, args):
@@ -43,7 +44,7 @@ def save_exemplar(dataloaders, model, args):
         splits = ['test']
     else:
         splits = ['train', 'test']
-    target_dir = f'exemplar_{args.model}tokens_{args.dataset}_ucfpretrained'
+    target_dir = f'exemplar_{args.model}tokens_{args.dataset}_new'
     for split in splits:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
@@ -71,7 +72,7 @@ def save_exemplar(dataloaders, model, args):
                 # s, e = peak - length // 4, peak + length // 4
                 s = starts[j].item()
                 e = ends[j].item()
-                if starts[j] == ends[j]:
+                if s==e:
                     continue
                 idx = np.linspace(s, min(e, video.shape[1]-1), num_frames+1)[:num_frames].astype(int)
                 clips = video[:, idx]
@@ -128,9 +129,9 @@ def save_tokens(dataloaders, model, args):
     elif args.dataset == 'Quva':
         splits = ['test']
     else:
-        splits = ['train', 'test']
+        splits = ['test']
     
-    target_dir = f'saved_{args.model}tokens_{args.dataset}_ucfpretrained'
+    target_dir = f'saved_{args.model}tokens_{args.dataset}_new'
 
     
     for split in splits:
@@ -189,7 +190,7 @@ def main():
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
     if args.model == 'VideoMAE':
         
-        model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False).cuda()
+        model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False, encodings=args.encodings).cuda()
         # if args.pretrained_encoder:
         state_dict = torch.load(args.pretrained_encoder)['model_state']
         #state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
@@ -209,7 +210,7 @@ def main():
         #                 model.state_dict()[name].copy_(param)
         #             except:
         #                 print(f"parameters {name} not found")
-        # print(state_dict.keys())
+        print(state_dict.keys())
         for name in model.state_dict().keys():
             if 'decoder' in name:
                 continue
@@ -252,10 +253,10 @@ def main():
         # print(model.module.layers[0].blocks[0].attn.qkv.weight.data)
 
     elif args.model == '3D-ResNeXt101':
-        model = resnext.resnet101(num_classes=101, sample_size=224, sample_duration=64, last_fc=False)
+        model = resnext.resnet101(num_classes=400, sample_size=224, sample_duration=64, last_fc=False)
         model = model.cuda()
         model = nn.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
-        model.load_state_dict(torch.load('pretrained_models/resnext-101-64f-kinetics-ucf101_split1.pth')['state_dict'])
+        model.load_state_dict(torch.load('pretrained_models/resnext-101-64f-kinetics.pth')['state_dict'])
         
         # model.load_state_dict(torch.load('results/0208-23:40_2stream/save_62.pth')['state_dict'], strict=False)
         

@@ -2,7 +2,7 @@
 
 # Parameters
 #SBATCH --cpus-per-task=40
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:1
 #SBATCH --job-name=vtf
 #SBATCH --mem=500GB
 #SBATCH --nodes=1

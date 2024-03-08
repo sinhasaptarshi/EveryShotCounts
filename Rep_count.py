@@ -123,6 +123,7 @@ class Rep_count(torch.utils.data.Dataset):
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # self.df = self.df[self.df['fps'] >= 10]
         # self.df = self.df[(self.df['name'] == 'stu9_71.mp4')]# or (self.df['name'] =='stu9_7.mp4')]
+        # self.df = self.df[self.df['name'] == 'stu4_3.mp4']
         self.df = self.df[self.df['num_frames'] > 64]
         # self.df = self.df[self.df['name'] == 'test118.mp4']
         # self.df = pd.concat([self.df, self.df])

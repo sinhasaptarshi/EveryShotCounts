@@ -6,8 +6,8 @@
 #SBATCH --job-name=vtf
 #SBATCH --mem=500GB
 #SBATCH --nodes=1
-#SBATCH --partition=small
-#SBATCH --time=1-00:00:00
+#SBATCH --partition=long
+#SBATCH --time=1-24:00:00
 
 # mkdir /raid/local_scratch/sxs63-wwp01/$SLURM_JOB_ID
 cp -r exemplar_tokens_reencoded/ /raid/local_scratch/sxs63-wwp01/$SLURM_JOB_ID

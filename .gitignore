@@ -48,3 +48,4 @@ node_modules
 selected_videos/
 QUVARepetitionDataset.tar.gz
 QUVARepetitionDataset/
+results/

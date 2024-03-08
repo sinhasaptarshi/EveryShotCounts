@@ -15,12 +15,13 @@ import torchvision.utils
 from slowfast.models import head_helper, operators, stem_helper 
 
 from timm.models.vision_transformer import PatchEmbed, Block
-from models_crossvit import CrossAttentionBlock, SelfAttentionBlock
+# from models_crossvit import CrossAttentionBlock, SelfAttentionBlock
+from models_crossvit_updated import CrossAttentionBlock, SelfAttentionBlock
 
 from util.pos_embed import get_2d_sincos_pos_embed
 import logging
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from models_crossvit import Attention
+# from models_crossvit import Attention
 
 
 
@@ -341,6 +342,7 @@ class SupervisedMAE(nn.Module):
         # )
 
         self.decode_heads = nn.ModuleList([SelfAttentionBlock(decoder_embed_dim, decoder_num_heads, qkv_bias=True, norm_layer=norm_layer, drop_path=0) for i in range(3)])
+        self.groupnorm = nn.GroupNorm(8, 512)
         # self.decode_head1 = nn.Sequential(
         #     nn.Conv3d(256, 256, kernel_size=3, stride=1, padding=1),
         #     nn.GroupNorm(8, 256),
@@ -662,19 +664,39 @@ class SupervisedMAE(nn.Module):
         # x = self.decode_head2(x)  ### (B, 1, 8, 1, 1)
         # x = x.squeeze(-1).squeeze(-1)
         # x = self.temporal_map(x)
+        # x = x + pos_embed
+        # print(x)
+        compute_windows = False
+        if compute_windows:
+            x_stack = []
+            x = torch.cat([x, torch.zeros(x.shape[0], 8*6*6, x.shape[-1]).cuda()],1)
+            for i in range(0, x.shape[1]-(8*6*6), 8*6*6):
+                x_stack.append(x[:,i:i+(8*6*6)])
+            x = torch.stack(x_stack)
+            x = x.reshape(-1, x.shape[2], x.shape[3])
+            print(x.shape)
+            # x = einops.rearrange(x, 'B (T H W) C -> B C T H W', T=t, H=h, W=w)
+
         for i, decode_head in enumerate(self.decode_heads):
             x = decode_head(x)
+            # x = torch.rand(x.shape).cuda()
+            # print(x)
             # print(x.shape)
             
             # if i<2:
             #     x = einops.rearrange(x, 'B (T H W) C -> B C T H W', T=t, H=h, W=w)
+            #     x = self.groupnorm(x)
             #     x = F.max_pool3d(x,(1,2,2))
             #     # print(x.shape)
             #     _, c, t, h, w = x.shape
             #     x = einops.rearrange(x, 'B C T H W -> B (T H W) C')
-        
+        print(x)
+        x = x.reshape(1, -1, x.shape[-1])
+        print(x.shape)
         x = self.map(x)
-        x = x.squeeze(-1).reshape(-1, t, h, w)
+        # print(x)
+        x = x.squeeze(-1).reshape(x.shape[0], -1, h, w)
+        x = x[:,:t]
         x = self.pool(x)
         x = x.squeeze(-1).squeeze(-1)
 

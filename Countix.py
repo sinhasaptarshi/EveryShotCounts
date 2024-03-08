@@ -120,13 +120,15 @@ class Countix(torch.utils.data.Dataset):
         self.jittering = jittering # temporal jittering (augmentation)
         self.add_noise = add_noise # add noise to frames (augmentation)
         csv_path = f"datasets/countix/new_{self.split}.csv"
+        csv_path = f"datasets/countix/left_videos.csv"
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df['counts'].notna()]
         self.df = self.df[self.df['num_frames'] > 0]
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # self.df = self.df[self.df['fps'] >= 10]
         # self.df = self.df[(self.df['name'] == 'stu9_71.mp4')]# or (self.df['name'] =='stu9_7.mp4')]
-        # self.df = self.df[self.df['num_frames'] > 64]
+        self.df = self.df[self.df['num_frames'] > 40]
+        self.df = self.df[self.df['counts']>0]
         # self.df = self.df[self.df['name'] == 'test118.mp4']
         # self.df = pd.concat([self.df, self.df])
 

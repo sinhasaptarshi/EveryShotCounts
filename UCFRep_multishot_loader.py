@@ -29,7 +29,8 @@ class UCFRep(torch.utils.data.Dataset):
                  peak_at_random_location=False,
                  get_overlapping_segments=False,
                  multishot=True,
-                 density_peak_width=1.0):
+                 density_peak_width=1.0,
+                 threshold=0.0):
         
         self.num_frames=num_frames
         self.lim_constraint = lim_constraint
@@ -44,6 +45,7 @@ class UCFRep(torch.utils.data.Dataset):
         self.peak_at_random_location = peak_at_random_location
         self.get_overlapping_segments = get_overlapping_segments
         self.multishot = multishot
+        self.threshold = threshold
         self.density_peak_width = density_peak_width
         self.temporal_downsample = 16 if '3D-ResNeXt101' in self.tokens_dir else 8
         if self.split == 'train':
@@ -60,6 +62,8 @@ class UCFRep(torch.utils.data.Dataset):
         # csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
         self.df = pd.read_csv(csv_path)
         self.df['density_map_sum'] = 0
+        self.train_df = pd.read_csv("datasets/ucf-rep/new_train.csv")
+        self.df['type'] = self.df['name'].apply(lambda x: x.split('/')[-2])
         # self.df = self.df[self.df['count'].notna()]
         # # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # # self.df = self.df[self.df['fps'] >= 10]
@@ -136,7 +140,14 @@ class UCFRep(torch.utils.data.Dataset):
                 # shot_num = min(1, N)
                 # shot_num = 1
                 shot_num = min(shot_num, N)
-                idx = np.arange(shot_num)
+                # idx = np.arange(shot_num)
+                if shot_num == 1:
+                    idx = [N//2]
+                elif shot_num == 2:
+                    idx = [N//4, 3*N//4]
+                elif shot_num == 3:
+                    idx = [N//4, N//2, 3*N//4]
+                # idx = [ N//2]
                 # idx = np.linspace(0,N,shot_num+1)[:shot_num].astype(int)
                 # print(shot_num)
                 # if id is not None:
@@ -187,6 +198,7 @@ class UCFRep(torch.utils.data.Dataset):
             # tokens = einops.rearrange(tokens,'S C T H W -> C (S T) H W')
             # tokens = np.random.rand(tokens.shape[0], tokens.shape[1], tokens.shape[2], tokens.shape[3])
         else:
+
             # print(segment_id)
             if bounds is not None:
                 low_bound = int(bounds[0]//self.temporal_downsample)
@@ -291,6 +303,7 @@ class UCFRep(torch.utils.data.Dataset):
     def __getitem__(self, index):
         
         video_name = self.df.iloc[index]['name'].split('/')[-1].replace('.avi', '.npz')
+        type = self.df.iloc[index]['name'].split('/')[-2]
         row = self.df.iloc[index]
         if self.get_overlapping_segments and self.split=='train':
             segment_id = np.random.randint(4)
@@ -315,6 +328,30 @@ class UCFRep(torch.utils.data.Dataset):
         else:
             shot_num_ = 1
         
+
+        # exemplar_videos = []
+        # for i in range(shot_num_):
+        # if self.split == 'train':
+        if np.random.rand() < self.threshold and type != 'other' and self.split == 'train':
+            select_videos = self.df['name'][self.df['type'] == type].values
+            select_example_video = np.random.choice(select_videos)
+            exemplar_video_name = select_example_video.split('/')[-1].replace('.avi', '.npz')
+        else:
+            exemplar_video_name = video_name
+
+        # else:
+        #     if type != 'others':
+        #         select_videos = self.train_df['name'][self.train_df['type'] == type].values
+        #         select_example_video = select_videos[3]
+        #         exemplar_video_name = select_example_video.replace('.mp4', '.npz').split('/')[-1].replace('.avi', '.npz')
+        #     else:
+        #         exemplar_video_name = video_name
+        # exemplar_videos.append(exemplar_video_name)
+    
+        # if len(exemplar_videos) == 0:
+        #     exemplar_videos.append(video_name)
+                
+        
         
         if self.split in ['val', 'test']:
             lim_constraint = np.inf
@@ -331,13 +368,15 @@ class UCFRep(torch.utils.data.Dataset):
             # segment_end = int(ends[end])
             # segment_start = row['segment_start'] - row['start_frame']
             # segment_end = row['segment_end'] - row['start_frame']
-            segment_start = row['start_frame']
-            segment_end = row['end_frame'] #- row['start_frame']
+            # segment_start = row['start_frame']
+            # segment_end = row['end_frame'] #- row['start_frame']
+            segment_start = row['start_frame'] - row['start_frame']
+            segment_end = row['end_frame'] - row['start_frame']
         else:
-            # segment_start = row['segment_start'] - row['start_frame']
-            # segment_end = row['segment_end'] - row['start_frame']
-            segment_start = row['start_frame']
-            segment_end = row['end_frame']# - row['start_frame']  
+            segment_start = row['start_frame'] - row['start_frame']
+            segment_end = row['end_frame'] - row['start_frame']
+            # segment_start = row['start_frame']
+            # segment_end = row['end_frame']# - row['start_frame']  
         num_frames = math.ceil(row['num_frames']/self.temporal_downsample)* self.temporal_downsample  
         
         # 
@@ -391,13 +430,13 @@ class UCFRep(torch.utils.data.Dataset):
         durations = durations.astype(np.float32)
         durations[durations == 0] = 0
         select_exemplar = durations.argmax()
-        examplar_path = f"{self.exemplar_dir}/{video_name}"
+        examplar_path = f"{self.exemplar_dir}/{exemplar_video_name}"
         # examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
         # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '_new.npz')}"
         if self.split == 'train':
-            example_rep, shot_num = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=actual_counts, shot_num=shot_num_) 
+            example_rep, shot_num = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=None, shot_num=shot_num_) 
         else:
-            example_rep, shot_num = self.load_tokens(examplar_path,True, id = None, count=actual_counts, shot_num=shot_num_)
+            example_rep, shot_num = self.load_tokens(examplar_path,True, id = None, count=None, shot_num=shot_num_)
         if shot_num_ == 0:
             shot_num = 0
         if example_rep.shape[1] == 0:

@@ -12,7 +12,7 @@ from egoloops_multishot_loader import EgoLoops
 from Quva_multishot_loader import Quva
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE as SupervisedMAE
-from video_mae_cross_full_attention import SupervisedMAE as SupervisedMAE_fullattention
+from video_mae_cross_full_attention1 import SupervisedMAE as SupervisedMAE_fullattention
 from video_memae import RepMem
 from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
@@ -25,6 +25,9 @@ import random
 from util.lr_sched import adjust_learning_rate
 import pandas as pd
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from scipy.signal import find_peaks
+import matplotlib.pyplot as plt 
+from matplotlib import rc
 
 torch.manual_seed(0)
 
@@ -149,10 +152,12 @@ def get_args_parser():
     parser.add_argument("--title", default="CounTR_finetuning", type=str)
     parser.add_argument("--use_wandb", default=True, type=lambda x: (str(x).lower() == 'true'))
     parser.add_argument("--wandb", default="counting", type=str)
-    parser.add_argument("--team", default="repetition_counting", type=str)
+    parser.add_argument("--team", default="long-term-video", type=str)
     parser.add_argument("--wandb_id", default='counTR_exp', type=str)
     
     parser.add_argument("--token_pool_ratio", default=0.6, type=float)
+    parser.add_argument("--rho", default=0.7, type=float)
+    parser.add_argument("--window_size", default=3, type=int, nargs='+', help='window size for windowed self attention')
 
     return parser
 
@@ -164,6 +169,7 @@ def main():
     parser = get_args_parser()
     args = parser.parse_args()
     print(args)
+    args.window_size = tuple(args.window_size)
     args.opts = None
     g = torch.Generator()
     g.manual_seed(args.seed)
@@ -187,7 +193,8 @@ def main():
                                     pool_tokens_factor=args.token_pool_ratio,
                                     peak_at_random_location=args.peak_at_random_locations,
                                     get_overlapping_segments=args.get_overlapping_segments,
-                                    multishot=args.multishot)
+                                    multishot=args.multishot,
+                                    encodings=args.encodings)
             
             dataset_valid = Countix(split="val",
                                     tokens_dir = args.tokens_dir,
@@ -198,7 +205,8 @@ def main():
                                     pool_tokens_factor=args.token_pool_ratio,
                                     peak_at_random_location=args.peak_at_random_locations,
                                     get_overlapping_segments=args.get_overlapping_segments,
-                                    multishot=args.multishot)
+                                    multishot=args.multishot,
+                                    encodings=args.encodings)
             dataset_test = Countix(split="test",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
@@ -208,7 +216,8 @@ def main():
                                     pool_tokens_factor=args.token_pool_ratio,
                                     peak_at_random_location=args.peak_at_random_locations,
                                     get_overlapping_segments=args.get_overlapping_segments,
-                                    multishot=args.multishot)
+                                    multishot=args.multishot,
+                                    encodings=args.encodings)
         elif args.dataset == 'RepCount':
             dataset_train = Rep_count(split="train",
                                     tokens_dir = args.tokens_dir,
@@ -255,7 +264,8 @@ def main():
                                     pool_tokens_factor=args.token_pool_ratio,
                                     peak_at_random_location=args.peak_at_random_locations,
                                     get_overlapping_segments=args.get_overlapping_segments,
-                                    multishot=args.multishot)
+                                    multishot=args.multishot,
+                                    threshold=args.threshold)
             
             dataset_valid = UCFRep(split="valid",
                                     tokens_dir = args.tokens_dir,
@@ -366,7 +376,7 @@ def main():
     scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     # scaler = NativeScaler()
     if args.full_attention:
-        model = SupervisedMAE_fullattention(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, no_exemplars=args.no_exemplars).cuda() 
+        model = SupervisedMAE_fullattention(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, no_exemplars=args.no_exemplars, window_size=args.window_size).cuda() 
     else:
         model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, no_exemplars=args.no_exemplars).cuda()
     #model = RepMem().cuda()
@@ -394,7 +404,7 @@ def main():
     # print(f"--- Loaded {loaded} params from statedict ---")
     
     
-    
+    # 
     train_step = 0
     val_step = 0
     if args.only_test:
@@ -419,6 +429,9 @@ def main():
         tp = 0
         fp = 0
         gt_peaks = 0
+        pk_count_pred = 0
+        csv_path = f"datasets/countix/new_test.csv"
+        df = pd.read_csv(csv_path)
         
         bformat='{l_bar}{bar}| {n_fmt}/{total_fmt} {rate_fmt}{postfix}'
         with tqdm(total=len(dataloader),bar_format=bformat,ascii='░▒█') as pbar:
@@ -460,10 +473,13 @@ def main():
                         pred = (pred1 + pred2) / 2
                     else:
                         # print(shot_num)
-                        pred = torch.zeros(1, thw[0][0]).cuda()
-                        for shots in range(shot_num+1):
-                            pred += model(data, example, thw, shot_num=shots)
-                        pred = pred / (shot_num+1)
+                        pred = model(data, example, thw, shot_num=shot_num)
+                        print(pred)
+                        # pred = torch.zeros(1, thw[0][0]).cuda()
+                        # for shots in range(shot_num+1):
+                        #     pred += model(data, example, thw, shot_num=shots)
+                        # pred = pred / (shot_num+1)
+                        # print(pred)
 
                     # for i in range(pred.shape[0]):
                     # num_segments = pred.shape[1] // 8
@@ -495,8 +511,8 @@ def main():
                 # print(video_name[0])
                 
                 mse = ((pred - density_map)**2).mean(-1)
-                np.savez('countix_density_maps_peaks1.0/'+video_name[0]+'_preds_1shot.npz', pred[0].cpu().numpy())
-                np.savez('countix_density_maps_peaks1.0/'+video_name[0]+'_countix_gt.npz', density_map[0].cpu().numpy())
+                np.savez('countix_density_maps_peaks1.0_v1/'+video_name[0]+'_preds_0shot.npz', pred[0].cpu().numpy())
+                np.savez('countix_density_maps_peaks1.0_v1/'+video_name[0]+'_preds_gt.npz', density_map[0].cpu().numpy())
                 predict_counts = torch.sum(pred, dim=1).type(torch.FloatTensor).cuda() / args.scale_counts
                 predict_counts = predict_counts.round()
                 predictions.extend(predict_counts.detach().cpu().numpy())
@@ -508,59 +524,103 @@ def main():
                 clips.append(data.shape[1]//(8*9*9))
                 pred = pred[0]/args.scale_counts
                 density_map = density_map[0]/args.scale_counts
-                pred[pred>0.00001] = 1
-                pred[pred<=0.00001] = 0
-                # print(density_map)
-                density_map[density_map>0.2] = 1
-                density_map[density_map<=0.2] = 0
-                window_maxima = torch.nn.functional.max_pool1d_with_indices(pred.view(1,1,-1), 4, 1, padding=4//2)[1].squeeze()
-                candidates = window_maxima.unique()
-                nice_peaks = candidates[(window_maxima[candidates]==candidates).nonzero()]
-                window_maxima_gt = torch.nn.functional.max_pool1d_with_indices(density_map.view(1,1,-1), 4, 1, padding=4//2)[1].squeeze()
-                candidates_gt = window_maxima_gt.unique()
-                nice_peaks_gt = candidates_gt[(window_maxima_gt[candidates_gt]==candidates_gt).nonzero()]
-                # print(density_map)
-                # print(nice_peaks_gt)
-                nice_peaks = nice_peaks.reshape(-1)
-                nice_peaks_gt = nice_peaks_gt.reshape(-1)
-                for peaks in nice_peaks_gt:
-                    if density_map[peaks] != 0:
-                        gt_peaks += 1
+                pred_density_map = pred.detach().cpu()
+                # pred_density_map /= args.scale_counts
+                max_p = pred_density_map.max().item() # get the max value in the density map
+                min_p = pred_density_map.min().item() # get the min value in the density map
+                
+                # peaks_pred, _ = find_peaks(pred_density_map.numpy(), width=1, height=(max_p-min_p)*args.rho) # relative peaks search based on rho
+                # row = df.loc[df['video_id'] == video_name[0]+'.mp4']
+                # cycle = [int(float(row[key])) for key in row.keys() if 'L' in key and not math.isnan(row[key])] # loading start and end of repetitions
+                
+                # segment_start = row['segment_start'].item()
+                # segment_end = row['segment_end'].item()
+                # num_frames = row['num_frames'].item()   
+                
+                # inter = 0 # count for intersection
+                # union = 0 # count for union
+                
+                # frame_ids = np.arange(num_frames)
+                # low = ((segment_start // 8)) * 8
+                # up = (min(math.ceil(segment_end / 8 ), np.inf))* 8
+                # select_frame_ids = frame_ids[low:up][0::8]
+                
+                # for j in range(0,len(cycle),2):
+                #     if cycle[j] == cycle[j+1]: # only use reps with at leats one frame
+                #         continue
+                #     st, end = (cycle[j]//8) * 8, min(np.ceil(cycle[j+1]/8) * 8, select_frame_ids[-1]) # normalise based on density map temporal resolution
+                #     in_segment = False
+                #     for p in peaks_pred:
+                #         if p >= st and p <= end: # peak is within repetition
+                #             inter += 1  # add to counts
+                #             union += 1
+                #             in_segment = True # set flag so it's only added to the union once
+                #     if not in_segment:
+                #         union += 1 # add only if no peaks were within the repetition's start and end
+                
+                
+                # pk_count_pred += inter / union # calculate IoU
+                
+                
+                # pbar.set_description("PHASE: test ")
+                # pbar.set_postfix_str(f"PK-COUNT/i : {pk_count_pred/(i+1):.4f}") # print IoU per iteration
+                # pbar.update()
+            
+        #         pred[pred>0.00001] = 1
+        #         pred[pred<=0.00001] = 0
+        #         # print(density_map)
+        #         density_map[density_map>0.2] = 1
+        #         density_map[density_map<=0.2] = 0
+        #         window_maxima = torch.nn.functional.max_pool1d_with_indices(pred.view(1,1,-1), 4, 1, padding=4//2)[1].squeeze()
+        #         candidates = window_maxima.unique()
+        #         nice_peaks = candidates[(window_maxima[candidates]==candidates).nonzero()]
+        #         window_maxima_gt = torch.nn.functional.max_pool1d_with_indices(density_map.view(1,1,-1), 4, 1, padding=4//2)[1].squeeze()
+        #         candidates_gt = window_maxima_gt.unique()
+        #         nice_peaks_gt = candidates_gt[(window_maxima_gt[candidates_gt]==candidates_gt).nonzero()]
+        #         # print(density_map)
+        #         # print(nice_peaks_gt)
+        #         nice_peaks = nice_peaks.reshape(-1)
+        #         nice_peaks_gt = nice_peaks_gt.reshape(-1)
+        #         for peaks in nice_peaks_gt:
+        #             if density_map[peaks] != 0:
+        #                 gt_peaks += 1
 
-                for peak in nice_peaks:
-                    if pred[peak] == 0:
-                        continue
-                    flag = 0
-                    # print(nice_peaks_gt)
-                    for gt in nice_peaks_gt:
-                        if density_map[gt] == 0:
-                            continue
-                        if abs(peak - gt) < 5:
-                            tp += 1
-                            flag = 1
-                            nice_peaks_gt = nice_peaks_gt[nice_peaks_gt != gt]
-                    if flag == 0:
-                        fp += 1
+        #         for peak in nice_peaks:
+        #             if pred[peak] == 0:
+        #                 continue
+        #             flag = 0
+        #             # print(nice_peaks_gt)
+        #             for gt in nice_peaks_gt:
+        #                 if density_map[gt] == 0:
+        #                     continue
+        #                 if abs(peak - gt) < 5:
+        #                     tp += 1
+        #                     flag = 1
+        #                     nice_peaks_gt = nice_peaks_gt[nice_peaks_gt != gt]
+        #             if flag == 0:
+        #                 fp += 1
                         
-        print(tp)
-        print(fp)
-        print(gt_peaks)
-        print('precision',tp/(tp+fp))
-        print('recall', tp/gt_peaks)
+        # print(tp)
+        # print(fp)
+        # print(gt_peaks)
+        # print('precision',tp/(tp+fp))
+        # print('recall', tp/gt_peaks)
                 # print(predict_mae)
         # print(videos)
         predict_mae = np.array(predict_mae)
-        predictions = np.array(predictions)
+        predictions = np.array(predictions).round()
         gt_counts = np.array(gt_counts)
         predict_mse = np.array(predict_mse)
         videos = pd.DataFrame(videos, columns=['name'])
         loss = pd.DataFrame(loss, columns=['0shot_loss'])
+        preds_1 = pd.DataFrame(predictions, columns=['ESCounts'])
+        gt_1 = pd.DataFrame(gt_counts, columns=['Gt counts'])
         # df = pd.read_csv('datasets/ucf_aug_val_new.csv')
         # df['predictions'] = predictions
         # df['gt_counts'] = gt_counts
         # df.to_csv('datasets/ucf_aug_val_new.csv')
-        df = pd.concat([videos, loss], axis=1)
-        df.to_csv('countix_results_2.csv')
+        df = pd.concat([videos, loss, preds_1, gt_1], axis=1)
+        df.to_csv('repcount_results_2.csv')
         clips = np.array(clips)
         min_ = clips.min()
         max_ = clips.max()
@@ -746,7 +806,7 @@ def main():
                             # loss = loss1
                             if phase=='train':
                                 # loss1 = loss / args.accum_iter
-                                loss1 = (loss + loss3) / args.accum_iter
+                                loss1 = (loss + 1.0 * loss3) / args.accum_iter
                                 # loss1 = loss
                                 # scaler(loss, optimizer, parameters=model.parameters(), update_grad=(i + 1) % args.accum_iter == 0)
 

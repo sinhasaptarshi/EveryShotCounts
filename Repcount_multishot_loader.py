@@ -16,7 +16,7 @@ import einops
 
 class Rep_count(torch.utils.data.Dataset):
     def __init__(self,
-                 split="val",
+                 split="train",
                  add_noise= False,
                  num_frames=512,
                  tokens_dir = "saved_tokens_reencoded",
@@ -53,13 +53,29 @@ class Rep_count(torch.utils.data.Dataset):
             # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
             csv_path = f"datasets/repcount/train_with_fps_mod.csv"
         else:
-            csv_path = f"datasets/repcount/test_with_fps.csv"
+            csv_path = f"datasets/repcount/test_with_fps_mod.csv"
         # csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
+        self.train_df = pd.read_csv('datasets/repcount/train_with_fps_mod.csv')
+        self.train_df = self.train_df[self.train_df['num_frames'] > 64]
+        self.train_df = self.train_df.drop(self.train_df.loc[self.train_df['name']=='stu1_10.mp4'].index)
+        self.train_df = self.train_df[self.train_df['count'] > 0]
+        self.dict = {}
+        types = self.train_df['type'].values
+        names = self.train_df['name'].values
+        for type in np.unique(types):
+            if type != 'others':
+                self.dict[type] = []
+        for type, name in zip(types, names):
+            self.dict[type].append(name)
+
+
+
+
         self.df = pd.read_csv(csv_path)
         self.df['density_map_sum'] = 0
         self.df = self.df[self.df['count'].notna()]
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
-        # self.df = self.df[self.df['fps'] >= 10]
+        self.df = self.df[self.df['fps'] >= 10]
         self.df = self.df[self.df['num_frames'] > 64]
         self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
         self.df = self.df[self.df['count'] > 0] # remove no reps
@@ -99,6 +115,8 @@ class Rep_count(torch.utils.data.Dataset):
     
         
     def load_tokens(self,path,is_exemplar,bounds=None, lim_constraint=np.inf, id=None, cycle_start_id=0, count=None, shot_num=1, get_overlapping_segments=False, segment_id=0):
+
+        
         try:
             tokens = np.load(path)['arr_0'] # Load in format C x t x h x w
         except:
@@ -134,7 +152,9 @@ class Rep_count(torch.utils.data.Dataset):
                 # shot_num = 1
                 shot_num = min(shot_num, N)
                 # print(id)
-                idx = np.arange(N)[id:id+1]
+                id = N // 2
+                idx = np.array([id])
+                # idx = np.arange(N)[(0, id)]
                 # idx = np.linspace(0,N,shot_num+1)[:shot_num].astype(int)
                 # print(shot_num)
                 # if id is not None:
@@ -291,12 +311,8 @@ class Rep_count(torch.utils.data.Dataset):
         action_type = self.df.iloc[index]['type']
 
         ### choosing examples from random videos with same class
-        if np.random.rand() < self.threshold and action_type != 'other':
-                select_videos = self.df['name'][self.df['type'] == action_type].values
-                select_example_video = np.random.choice(select_videos)
-                exemplar_video_name = select_example_video.replace('.mp4', '.npz')
-        else:
-            exemplar_video_name = video_name
+        
+
         row = self.df.iloc[index]
         if self.get_overlapping_segments and self.split=='train':
             segment_id = np.random.randint(4)
@@ -318,10 +334,31 @@ class Rep_count(torch.utils.data.Dataset):
                 # shot_num_ = 0
                 shot_num_ = np.random.randint(0,3)  ### number of examples
             else:
-                shot_num_ = 1
+                shot_num_ = 0
         else:
             shot_num_ = 1
         
+        # exemplar_videos = []
+        # for i in range(shot_num_):
+        if np.random.rand() < self.threshold and action_type != 'other' and self.split == 'train':
+            select_videos = self.df['name'][self.df['type'] == action_type].values
+            select_example_video = np.random.choice(select_videos)
+            exemplar_video_name = select_example_video.replace('.mp4', '.npz')
+        else:
+            exemplar_video_name = video_name
+
+        #     else:
+        #         if action_type != 'others':
+        #             select_videos = self.train_df['name'][self.train_df['type'] == action_type].values
+        #             select_example_video = select_videos[3 + i*6 ]
+        #             exemplar_video_name = select_example_video.replace('.mp4', '.npz')
+        #         else:
+        #             exemplar_video_name = video_name
+        #     exemplar_videos.append(exemplar_video_name)
+        
+        # if len(exemplar_videos) == 0:
+        #     exemplar_videos.append(video_name)
+                
         
         # if self.split in ['val', 'test']:
         #     lim_constraint = np.inf
@@ -335,11 +372,11 @@ class Rep_count(torch.utils.data.Dataset):
         # segment_start = 0
         # segment_end = row['num_frames']   
         # --- Alternate density map loading ---
-        # density_map = self.preprocess(num_frames, cycle, num_frames)
+        density_map = self.preprocess(num_frames, cycle, num_frames)
         frame_ids = np.arange(num_frames)
         low = ((segment_start // 8) + (segment_id * 2)) * 8
         up = (min(math.ceil(segment_end / 8 ), lim_constraint))* 8
-        # density_map = np.array(density_map[low: up])
+        density_map = np.array(density_map[low: up])
         select_frame_ids = frame_ids[low:up][0::8]
         density_map_alt = np.zeros(len(select_frame_ids))
         actual_counts = 0
@@ -374,17 +411,26 @@ class Rep_count(torch.utils.data.Dataset):
         durations = durations.astype(np.float32)
         durations[durations == 0] = np.inf
         select_exemplar = durations.argmin()
-        # examplar_path = f"{self.exemplar_dir}/{exemplar_video_name}"
-        examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
+        # if 'VideoMAE' in self.exemplar_dir:
+        #     examplar_path = f"{self.exemplar_dir}/{exemplar_video_name.replace('.npz', '_new.npz')}"
+        # else:
+        # exemplar_reps = []
+        # for exemplar_video_name in exemplar_videos:
+        examplar_path = f"{self.exemplar_dir}/{exemplar_video_name}"
+        # examplar_path = f"{self.exemplar_dir}/{exemplar_video_name.replace('.npz', '_new.npz')}"
         # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '_new.npz')}"
         if self.split == 'train':
             example_rep, shot_num = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, shot_num=shot_num_) 
         else:
-            example_rep, shot_num = self.load_tokens(examplar_path,True, id = select_exemplar, shot_num=shot_num_)
+            example_rep, shot_num = self.load_tokens(examplar_path,True, id = 0, shot_num=shot_num_)
         if shot_num_ == 0:
             shot_num = 0
         if example_rep.shape[1] == 0:
             print(row)
+        # exemplar_reps.append(example_rep)
+        # example_rep = torch.stack(exemplar_reps)
+        # example_rep = einops.rearrange(example_rep,'B C T H W -> C (B T) H W')
+        # print(example_rep.shape)
         # example_rep = self.load_tokens(examplar_path, True)
         
         

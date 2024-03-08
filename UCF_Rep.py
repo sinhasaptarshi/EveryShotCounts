@@ -49,7 +49,7 @@ def read_video_timestamps(video_filename, timestamps, exemplar_timestamps, durat
     # max_t = max((max(timestamps),max(exemplar_timestamps)))
     min_t = min(timestamps)
     max_t = max(timestamps)
-    max_t = 1000000000000000
+    # max_t = 1000000000000000
     
     for i, f in enumerate(islice(container.decode(video=0), min_t, max_t+1)):
         c = i + min_t
@@ -322,7 +322,7 @@ class UCFRep(torch.utils.data.Dataset):
 
         segment_start = 0
         segment_end = row['end_frame'] - row['start_frame']  
-        num_frames = math.ceil(row['num_frames']/16)* 16
+        num_frames = math.ceil(row['num_frames']/8)* 8
         
         # 
         # segment_start = 0
@@ -331,12 +331,12 @@ class UCFRep(torch.utils.data.Dataset):
         # density_map = self.preprocess(num_frames, cycle, num_frames)
         num_frames = num_frames #+ 15
         frame_ids = np.arange(num_frames)
-        low = ((segment_start // 16) ) * 16
-        up = (min(math.ceil(segment_end / 16 ), lim_constraint))* 16
+        low = ((segment_start // 8) ) * 8
+        up = (min(math.ceil(segment_end / 8 ), lim_constraint))* 8
         # density_map = np.array(density_map[low: up])
         # select_frame_ids = frame_ids[0::16]
         # print(len(select_frame_ids))
-        select_frame_ids = frame_ids[low:up][0::16]
+        select_frame_ids = frame_ids[low:up][0::8]
         density_map_alt = np.zeros(len(select_frame_ids))
         actual_counts = 0
         for i in range(0,len(cycle),2):
@@ -362,8 +362,8 @@ class UCFRep(torch.utils.data.Dataset):
         exemplar_frameidx = np.linspace(exemplar_start, exemplar_end, 3).astype(int)
         # print(exemplar_frameidx)
         
-        # frame_idx = self.get_vid_clips(duration-1, start=start_frame, end=end_frame)
-        frame_idx = self.get_vid_clips(duration)
+        frame_idx = self.get_vid_clips(duration-1, start=start_frame, end=end_frame)
+        # frame_idx = self.get_vid_clips(duration)
         # frame_idx, count, density = self.get_vid_segment(cycle, sample_breaks=False)
         # print(frame_idx)
         vid, exemplar, num_frames = read_video_timestamps(video_name, frame_idx, exemplar_frameidx, duration=duration-1)
@@ -385,13 +385,12 @@ class UCFRep(torch.utils.data.Dataset):
             exemplar = self.transform_exemplar(exemplar/255) 
         
 
-        # starts = starts - start_frame
-        # ends = ends - start_frame
+        starts = starts - start_frame
+        ends = ends - start_frame
         
         return vid, gt_density, count, starts, ends, self.df.iloc[index]['name'].split('/')[-1][:-4]#, segment_start, segment_end
 
-        starts = starts - start_frame
-        ends = ends - start_frame
+    def __len__(self):
         return len(self.df)
 
 
@@ -419,7 +418,7 @@ if __name__=='__main__':
         
         fps.append(item[4])
         
-        print(item[1].shape)
+        print(item[0].shape)
         print(item[-1])
         # print(i, item[1].shape)
         # print(i, item[2].shape)

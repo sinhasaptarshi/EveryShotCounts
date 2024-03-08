@@ -29,7 +29,8 @@ class Countix(torch.utils.data.Dataset):
                  peak_at_random_location=False,
                  get_overlapping_segments=False,
                  multishot=True,
-                 density_peak_width=1.0):
+                 density_peak_width=1.0,
+                 encodings='mae'):
         
         self.num_frames=num_frames
         self.lim_constraint = lim_constraint
@@ -45,6 +46,8 @@ class Countix(torch.utils.data.Dataset):
         self.get_overlapping_segments = get_overlapping_segments
         self.multishot = multishot
         self.density_peak_width = density_peak_width
+        self.encodings = encodings
+        self.temporal_downsample = 16 if self.encodings == 'resnext' else 8
         if self.split == 'train':
             # csv_path = f"datasets/repcount/{self.split}_balanced_new.csv"
             # csv_path = f"datasets/repcount/{self.split}_less_than_6.csv"
@@ -60,7 +63,8 @@ class Countix(torch.utils.data.Dataset):
         # self.df = self.df[:10]
         # self.df = self.df[self.df['count'] < 5] ### remove videos with more than 5 repetitions
         # self.df = self.df[self.df['fps'] >= 10]
-        self.df = self.df[self.df['num_frames'] > 0]
+
+        self.df = self.df[self.df['num_frames'] > 40]
         # self.df = self.df.drop(self.df.loc[self.df['name']=='stu1_10.mp4'].index)
         self.df = self.df[self.df['counts'] > 0] # remove no reps
         # self.df = self.df.drop(self.df.loc[self.df['name']=='stu9_69.mp4'].index)
@@ -187,9 +191,9 @@ class Countix(torch.utils.data.Dataset):
         else:
             # print(segment_id)
             if bounds is not None:
-                low_bound = bounds[0]//8
+                low_bound = bounds[0]//self.temporal_downsample
                 # up_bound = bounds[1]//8 
-                up_bound = min(math.ceil(bounds[1]/8), lim_constraint)
+                up_bound = min(math.ceil(bounds[1]/self.temporal_downsample), lim_constraint)
             if get_overlapping_segments:
                 if self.split != 'test':
                     tokens1 = tokens[segment_id::4]
@@ -332,17 +336,17 @@ class Countix(torch.utils.data.Dataset):
         # --- Alternate density map loading ---
         # density_map = self.preprocess(num_frames, cycle, num_frames)
         frame_ids = np.arange(num_frames)
-        low = ((segment_start // 8) + (segment_id * 2)) * 8
-        up = (min(math.ceil(segment_end / 8 ), lim_constraint))* 8
+        low = ((segment_start // self.temporal_downsample) + (segment_id * 2)) * self.temporal_downsample
+        up = (min(math.ceil(segment_end / self.temporal_downsample ), lim_constraint))* self.temporal_downsample
         # density_map = np.array(density_map[low: up])
-        select_frame_ids = frame_ids[low:up][0::8]
+        select_frame_ids = frame_ids[low:up][0::self.temporal_downsample]
         density_map_alt = np.zeros(len(select_frame_ids))
         actual_counts = 0
         for i in range(0,len(cycle),2):
             if cycle[i] == cycle[i+1]:
                 continue
             actual_counts += 1
-            st, end = (cycle[i]//8) * 8, min(np.ceil(cycle[i+1]/8) * 8, select_frame_ids[-1])
+            st, end = (cycle[i]//self.temporal_downsample) * self.temporal_downsample, min(np.ceil(cycle[i+1]/self.temporal_downsample) * self.temporal_downsample, select_frame_ids[-1])
             if st in select_frame_ids and end in select_frame_ids:
                 start_id = np.where(select_frame_ids == st)[0][0]
                 end_id = np.where(select_frame_ids == end)[0][0]
@@ -370,7 +374,7 @@ class Countix(torch.utils.data.Dataset):
         durations[durations == 0] = 0
         select_exemplar = durations.argmax()
         examplar_path = f"{self.exemplar_dir}/{video_name.replace('.npz', '_new.npz')}"
-        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['name'].replace('.mp4', '_new.npz')}"
+        # examplar_path = f"{self.exemplar_dir}/{self.df.iloc[(index + np.random.randint(100)) % self.__len__()]['video_id'].replace('.mp4', '_new.npz')}"
         if self.split == 'train':
             example_rep, shot_num = self.load_tokens(examplar_path,True, cycle_start_id=cycle_start_id, count=actual_counts, shot_num=shot_num_) 
         else:
