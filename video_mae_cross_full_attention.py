@@ -15,14 +15,54 @@ import torchvision.utils
 from slowfast.models import head_helper, operators, stem_helper 
 
 from timm.models.vision_transformer import PatchEmbed, Block
-# from models_crossvit import CrossAttentionBlock, SelfAttentionBlock
-from models_crossvit_updated import CrossAttentionBlock, SelfAttentionBlock
+from model_crossvit_window_attention import CrossAttentionBlock, WindowedSelfAttention, compute_mask, get_window_size
 
 from util.pos_embed import get_2d_sincos_pos_embed
 import logging
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 # from models_crossvit import Attention
 
+class PatchEmbed3D(nn.Module):
+    """ Video to Patch Embedding.
+
+    Args:
+        patch_size (int): Patch token size. Default: (2,4,4).
+        in_chans (int): Number of input video channels. Default: 3.
+        embed_dim (int): Number of linear projection output channels. Default: 96.
+        norm_layer (nn.Module, optional): Normalization layer. Default: None
+    """
+    def __init__(self, patch_size=(2,4,4), in_chans=3, embed_dim=96, norm_layer=None):
+        super().__init__()
+        self.patch_size = patch_size
+
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        if norm_layer is not None:
+            self.norm = norm_layer(embed_dim)
+        else:
+            self.norm = None
+
+    def forward(self, x):
+        """Forward function."""
+        # padding
+        _, _, D, H, W = x.size()
+        if W % self.patch_size[2] != 0:
+            x = F.pad(x, (0, self.patch_size[2] - W % self.patch_size[2]))
+        if H % self.patch_size[1] != 0:
+            x = F.pad(x, (0, 0, 0, self.patch_size[1] - H % self.patch_size[1]))
+        if D % self.patch_size[0] != 0:
+            x = F.pad(x, (0, 0, 0, 0, 0, self.patch_size[0] - D % self.patch_size[0]))
+
+        x = self.proj(x)  # B C D Wh Ww
+        if self.norm is not None:
+            D, Wh, Ww = x.size(2), x.size(3), x.size(4)
+            x = x.flatten(2).transpose(1, 2)
+            x = self.norm(x)
+            x = x.transpose(1, 2).view(-1, self.embed_dim, D, Wh, Ww)
+
+        return x
 
 
 def round_width(width, multiplier, min_width=1, divisor=1, verbose=False):
@@ -45,7 +85,7 @@ class SupervisedMAE(nn.Module):
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, just_encode=False, 
-                 use_precomputed=True, token_pool_ratio=1.0, iterative_shots=False, encodings='swin', no_exemplars=False):
+                 use_precomputed=True, token_pool_ratio=1.0, iterative_shots=False, encodings='swin', no_exemplars=False, window_size=(3,3,3)):
 
         super().__init__()
 
@@ -341,8 +381,28 @@ class SupervisedMAE(nn.Module):
         #     # nn.MaxPool3d((1,2,2))
         # )
 
-        self.decode_heads = nn.ModuleList([SelfAttentionBlock(decoder_embed_dim, decoder_num_heads, qkv_bias=True, norm_layer=norm_layer, drop_path=0) for i in range(3)])
-        self.groupnorm = nn.GroupNorm(8, 512)
+        # self.decode_heads = nn.ModuleList([SelfAttentionBlock(decoder_embed_dim, 8, qkv_bias=True, norm_layer=norm_layer, drop_path=0) for i in range(1)])
+        # self.window_size = (2,7,7)
+        self.window_size = window_size
+        self.shift_size = tuple(i // 2 for i in self.window_size)
+        self.downsample = None 
+        self.decode_heads = nn.ModuleList([
+            WindowedSelfAttention(
+                dim=decoder_embed_dim,
+                num_heads=8,
+                window_size=self.window_size,
+                # shift_size=(i,i,i),
+                shift_size=(0,0,0) if (i % 2 == 0) else self.shift_size,
+                mlp_ratio=4,
+                qkv_bias=True,
+                # qk_scale=qk_scale,
+                # drop=drop,
+                # attn_drop=attn_drop,
+                # drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                norm_layer=norm_layer,
+                use_checkpoint=False,
+            )
+            for i in range(3)])
         # self.decode_head1 = nn.Sequential(
         #     nn.Conv3d(256, 256, kernel_size=3, stride=1, padding=1),
         #     nn.GroupNorm(8, 256),
@@ -655,6 +715,17 @@ class SupervisedMAE(nn.Module):
         
         # h = w = int(math.sqrt(thw/t))
         t = int(thw / (h*w))
+        x = x.reshape(n,t,h,w,c)
+        B, D, H, W, C = x.shape
+        window_size, shift_size = get_window_size((D,H,W), self.window_size, self.shift_size)
+        
+        Dp = int(np.ceil(D / window_size[0])) * window_size[0]
+        Hp = int(np.ceil(H / window_size[1])) * window_size[1]
+        Wp = int(np.ceil(W / window_size[2])) * window_size[2]
+        attn_mask = compute_mask(Dp, Hp, Wp, window_size, shift_size, x.device)
+        x = x.view(B, D, H, W, -1)
+
+        
         # x = x.transpose(1, 2).reshape(n, c, t, h, w)
         # print(x.shape)
         # x = self.decode_head0(x)  
@@ -664,39 +735,26 @@ class SupervisedMAE(nn.Module):
         # x = self.decode_head2(x)  ### (B, 1, 8, 1, 1)
         # x = x.squeeze(-1).squeeze(-1)
         # x = self.temporal_map(x)
-        # x = x + pos_embed
         # print(x)
-        compute_windows = False
-        if compute_windows:
-            x_stack = []
-            x = torch.cat([x, torch.zeros(x.shape[0], 8*6*6, x.shape[-1]).cuda()],1)
-            for i in range(0, x.shape[1]-(8*6*6), 8*6*6):
-                x_stack.append(x[:,i:i+(8*6*6)])
-            x = torch.stack(x_stack)
-            x = x.reshape(-1, x.shape[2], x.shape[3])
-            print(x.shape)
-            # x = einops.rearrange(x, 'B (T H W) C -> B C T H W', T=t, H=h, W=w)
-
         for i, decode_head in enumerate(self.decode_heads):
-            x = decode_head(x)
-            # x = torch.rand(x.shape).cuda()
+            x = decode_head(x, attn_mask)
             # print(x)
             # print(x.shape)
             
             # if i<2:
             #     x = einops.rearrange(x, 'B (T H W) C -> B C T H W', T=t, H=h, W=w)
-            #     x = self.groupnorm(x)
             #     x = F.max_pool3d(x,(1,2,2))
             #     # print(x.shape)
             #     _, c, t, h, w = x.shape
             #     x = einops.rearrange(x, 'B C T H W -> B (T H W) C')
-        print(x)
-        x = x.reshape(1, -1, x.shape[-1])
-        print(x.shape)
+        if self.downsample is not None:
+            x = self.downsample(x)
         x = self.map(x)
+        x = einops.rearrange(x, 'b d h w c -> b c d h w')
+        # print(x.shape)
+        
         # print(x)
-        x = x.squeeze(-1).reshape(x.shape[0], -1, h, w)
-        x = x[:,:t]
+        x = x.squeeze(-1).reshape(-1, t, h, w)
         x = self.pool(x)
         x = x.squeeze(-1).squeeze(-1)
 

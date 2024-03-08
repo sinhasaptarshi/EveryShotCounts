@@ -5,15 +5,12 @@ import numpy as np
 import os, sys
 # from Rep_count_loader import Rep_count
 from Repcount_multishot_loader import Rep_count
-# from Repcount_balanced_loader import Rep_count
+
 from Countix_multishot_loader import Countix
 from UCFRep_multishot_loader import UCFRep
-from egoloops_multishot_loader import EgoLoops
-from Quva_multishot_loader import Quva
 from tqdm import tqdm
 from video_mae_cross import SupervisedMAE as SupervisedMAE
-from video_mae_cross_full_attention1 import SupervisedMAE as SupervisedMAE_fullattention
-from video_memae import RepMem
+from video_mae_cross_full_attention import SupervisedMAE as SupervisedMAE_fullattention
 from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
 from util.pos_embed import get_2d_sincos_pos_embed

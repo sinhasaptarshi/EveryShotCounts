@@ -13,7 +13,7 @@ import pandas as pd
 from Rep_count import Rep_count
 from Countix import Countix
 from UCF_Rep import UCFRep
-from QUVA import Quva
+
 from video_mae_cross import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
