@@ -44,7 +44,7 @@ def save_exemplar(dataloaders, model, args):
         splits = ['test']
     else:
         splits = ['train', 'test']
-    target_dir = f'exemplar_{args.model}tokens_{args.dataset}_new'
+    target_dir = f'exemplar_{args.model}tokens_{args.dataset}'
     for split in splits:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
@@ -131,7 +131,7 @@ def save_tokens(dataloaders, model, args):
     else:
         splits = ['test']
     
-    target_dir = f'saved_{args.model}tokens_{args.dataset}_new'
+    target_dir = f'saved_{args.model}tokens_{args.dataset}'
 
     
     for split in splits:
@@ -274,11 +274,6 @@ def main():
         dataset_train = UCFRep(cfg=cfg,split="train",sampling_interval=1,encode_only=True)
         dataset_val = UCFRep(cfg=cfg,split="val",sampling_interval=1,encode_only=True)
         dataset_test = UCFRep(cfg=cfg,split="val",sampling_interval=1,encode_only=True)
-    elif args.dataset == 'Quva':
-        dataset_train = Quva(cfg=cfg,split="test",sampling_interval=1,encode_only=True)
-        dataset_val = Quva(cfg=cfg,split="test",sampling_interval=1,encode_only=True)
-        dataset_test = Quva(cfg=cfg,split="test",sampling_interval=1,encode_only=True)
-
 
     dataloaders = {'train':torch.utils.data.DataLoader(dataset_train,batch_size=args.batch_size,
                                                        num_workers=8,
