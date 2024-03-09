@@ -1,5 +1,18 @@
 This is the codebase for the paper "Every Shot Counts: Using Exemplars for Repetition Counting in Videos"
 
+# Install environment
+
+Create a conda environment and activate it.
+
+`conda create -n repcount python=3.8`
+
+`conda activate repcount`
+
+Install the required packages
+
+`pip install -r requirements.txt`
+
+
 
 # Extract VideoMAE encodings
 
