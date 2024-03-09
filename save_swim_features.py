@@ -40,10 +40,8 @@ def save_exemplar(dataloaders, model, args):
         num_frames = 16
     if args.dataset == 'UCFRep':
         splits = ['train', 'val']
-    elif args.dataset == 'Quva':
-        splits = ['test']
     else:
-        splits = ['train', 'test']
+        splits = ['train', 'val', 'test']
     target_dir = f'exemplar_{args.model}tokens_{args.dataset}'
     for split in splits:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
@@ -126,10 +124,8 @@ def save_tokens(dataloaders, model, args):
         num_frames = 16
     if args.dataset == 'UCFRep':
         splits = ['train', 'val']
-    elif args.dataset == 'Quva':
-        splits = ['test']
     else:
-        splits = ['test']
+        splits = ['train', 'val', 'test']
     
     target_dir = f'saved_{args.model}tokens_{args.dataset}'
 
