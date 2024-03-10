@@ -115,7 +115,7 @@ def get_args_parser():
     parser.add_argument('--gt_dir', default='gt_density_maps_recreated', type=str,
                         help='ground truth density map directory')
     parser.add_argument('--threshold', default=0.0, type=float,
-                        help='cut off to decide if select exemplar from different video')
+                        help='p, cut off to decide if select exemplar from different video')
     
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
