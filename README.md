@@ -12,7 +12,15 @@ Install the required packages
 
 `pip install -r requirements.txt`
 
+# Dataset Download
 
+Download the Repcount dataset from [here](https://svip-lab.github.io/dataset/RepCount_dataset.html) under `data/RepCount` 
+
+Get Countix dataset from [here](https://sites.google.com/view/repnet) and get it under `data/Countix`
+
+Get Countix dataset from [here](https://sites.google.com/view/repnet) and get it under `data/Countix`
+
+For UCF101, download the dataset from [here](https://www.crcv.ucf.edu/data/UCF101.php) and get it under `data/UCFRep`
 
 # Extract VideoMAE encodings
 

@@ -31,6 +31,7 @@ def get_args_parser():
     parser.add_argument('--dataset', default='Repcount', help='choose from [Repcount, Countix, UCFRep]', type=str)
     parser.add_argument('--model', default='VideoMAE', help="VideoMAE, VideoSwin")
     parser.add_argument('--encodings', default='mae', help="mae, swin, resnext")
+    parser.add_argument('--data_path', default='', help='data path for the dataset')
     return parser
 
 def save_exemplar(dataloaders, model, args):
@@ -179,10 +180,7 @@ def main():
     args = parser.parse_args()
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
-    print(args.save_exemplar_encodings)
-    print(args.save_video_encodings)
-    args.data_path = '/jmain02/home/J2AD001/wwp01/sxs63-wwp01/repetition_counting/LLSP'
-    
+
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
     if args.model == 'VideoMAE':
         
