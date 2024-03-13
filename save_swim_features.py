@@ -14,7 +14,7 @@ from Rep_count import Rep_count
 from Countix import Countix
 from UCF_Rep import UCFRep
 
-from video_mae_cross import SupervisedMAE
+from video_mae_cross_full_attention import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
 from resnext_models import resnext

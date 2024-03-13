@@ -21,7 +21,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.distributed as dist
-import wandb
 from torch._six import inf
 import timm
 import matplotlib.pyplot as plt
@@ -408,53 +407,53 @@ def all_reduce_mean(x):
         return x
 
 
-def plot_counts(res_csv: Union[str, list[str]], output_dir: str, suffix: str = "", smooth: bool = False):
-    if suffix:
-        suffix = f"_{suffix}"
-    if smooth:
-        suffix = f"_smooth{suffix}"
-    if type(res_csv) == str:
-        res_csv = [res_csv]
+# def plot_counts(res_csv: Union[str, list[str]], output_dir: str, suffix: str = "", smooth: bool = False):
+#     if suffix:
+#         suffix = f"_{suffix}"
+#     if smooth:
+#         suffix = f"_smooth{suffix}"
+#     if type(res_csv) == str:
+#         res_csv = [res_csv]
 
-    plt.figure(figsize=(15, 5))
+#     plt.figure(figsize=(15, 5))
 
-    for res in res_csv:
-        name = Path(res).parent.name
-        df = pd.read_csv(res)
-        print(df)
+#     for res in res_csv:
+#         name = Path(res).parent.name
+#         df = pd.read_csv(res)
+#         print(df)
 
-        df.sort_values(by="name", inplace=True)
-        df.reset_index(drop=True, inplace=True)
-        df.index += 1
-        print(df)
+#         df.sort_values(by="name", inplace=True)
+#         df.reset_index(drop=True, inplace=True)
+#         df.index += 1
+#         print(df)
 
-        if smooth:
-            time_arr = df.index[5:-5]
-            smooth_pred_mean = df['prediction'].iloc[5:-5].rolling(25).mean()
-            smooth_pred_std = df['prediction'].iloc[5:-5].rolling(25).std()
-            plt.plot(time_arr, smooth_pred_mean, label=name)
-            plt.fill_between(time_arr, smooth_pred_mean + smooth_pred_std, smooth_pred_mean - smooth_pred_std, alpha=.2)
-            plt.xlabel('Frame')
-            plt.ylabel('Count')
-        else:
-            plt.plot(df.index, df['prediction'], label=name)
+#         if smooth:
+#             time_arr = df.index[5:-5]
+#             smooth_pred_mean = df['prediction'].iloc[5:-5].rolling(25).mean()
+#             smooth_pred_std = df['prediction'].iloc[5:-5].rolling(25).std()
+#             plt.plot(time_arr, smooth_pred_mean, label=name)
+#             plt.fill_between(time_arr, smooth_pred_mean + smooth_pred_std, smooth_pred_mean - smooth_pred_std, alpha=.2)
+#             plt.xlabel('Frame')
+#             plt.ylabel('Count')
+#         else:
+#             plt.plot(df.index, df['prediction'], label=name)
 
-    plt.legend()
-    plt.savefig(os.path.join(output_dir, f'counts{suffix}.png'), dpi=300)
+#     plt.legend()
+#     plt.savefig(os.path.join(output_dir, f'counts{suffix}.png'), dpi=300)
 
 
-def write_zeroshot_annotations(p: Path):
-    with open(p / 'annotations.json', 'a') as split:
-        split.write('{\n')
-        for img in p.iterdir():
-            if img.is_file():
-                split.write(f'  "{img.name}": {{\n' \
-                            '    "H": 960,\n' \
-                            '    "W": 1280,\n' \
-                            '    "box_examples_coordinates": [],\n' \
-                            '    "points": []\n' \
-                            '  },\n')
-        split.write("}")
+# def write_zeroshot_annotations(p: Path):
+#     with open(p / 'annotations.json', 'a') as split:
+#         split.write('{\n')
+#         for img in p.iterdir():
+#             if img.is_file():
+#                 split.write(f'  "{img.name}": {{\n' \
+#                             '    "H": 960,\n' \
+#                             '    "W": 1280,\n' \
+#                             '    "box_examples_coordinates": [],\n' \
+#                             '    "points": []\n' \
+#                             '  },\n')
+#         split.write("}")
 
     with open(p / 'split.json', 'a') as split:
         split.write('{\n  "test":\n  [\n')
