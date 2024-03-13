@@ -37,9 +37,8 @@ def read_video_timestamps(video_filename, timestamps,  duration=0):
     except:
         print(f"{video_filename} does not exist")
     
-    #video = EncodedVideo.from_path(video_filename) # load video with pytorchvideo dataset
     frames = []
-    #fs = video._container.decode(**{"video":0}) # get a stream of frames
+
     container = av.open(video_filename)
     
     min_t = min(timestamps)
