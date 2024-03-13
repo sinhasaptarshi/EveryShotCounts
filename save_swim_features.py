@@ -247,22 +247,3 @@ if __name__ == '__main__':
     main()
     
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# backbone.eval()
-# x = torch.rand(1, 3, 16, 224, 224).cuda()
-# y = backbone(x)
-# print(y.shape)
-
