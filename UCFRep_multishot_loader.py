@@ -21,7 +21,6 @@ class UCFRep(torch.utils.data.Dataset):
                  num_frames=512,
                  tokens_dir = "saved_VideoMAEtokens_UCFRep",
                  exemplar_dir = "exemplar_VideoMAEtokens_UCFRep",
-                 density_maps_dir = "gt_density_maps_recreated",
                  select_rand_segment=True,
                  compact=False,
                  lim_constraint=np.inf,
@@ -36,7 +35,6 @@ class UCFRep(torch.utils.data.Dataset):
         self.lim_constraint = lim_constraint
         self.tokens_dir = tokens_dir
         self.exemplar_dir = exemplar_dir
-        self.density_maps_dir = density_maps_dir
         self.compact = compact
         self.select_rand_segment = select_rand_segment
         self.pool_tokens = pool_tokens_factor
