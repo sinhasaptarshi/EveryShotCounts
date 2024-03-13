@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.utils
 from slowfast.models import head_helper, operators, stem_helper 
+from slowfast.models import stem_helper
 
 from timm.models.vision_transformer import PatchEmbed, Block
 from model_crossvit_window_attention import CrossAttentionBlock, WindowedSelfAttention, compute_mask, get_window_size

@@ -153,7 +153,7 @@ def main():
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
 
-    cfg = load_config(args, path_to_config='pretrain_config.yaml')
+    cfg = load_config(args, path_to_config='configs/pretrain_config.yaml')
     if args.model == 'VideoMAE': ### for videomae-based encoder (recommended)
         
         model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False, encodings=args.encodings).cuda()
