@@ -116,7 +116,7 @@ class Rep_count(torch.utils.data.Dataset):
                 up_bound = min(math.ceil(bounds[1]/8), lim_constraint)
             if get_overlapping_segments:
                 if self.split != 'test':   
-                    tokens1 = tokens[segment_id::4]   ### non overlapping tokens
+                    tokens1 = tokens[segment_id::4]   ### concatenating tokens for non-overlapping windows
                     tokens1 = einops.rearrange(tokens1,'S C T H W -> C (S T) H W')
                     tokens1 = tokens1[:, max(low_bound-(2*segment_id), 0):max(up_bound-(2*segment_id), 0)]
                     tokens1 = torch.from_numpy(tokens1)
