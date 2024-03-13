@@ -51,8 +51,6 @@ class Rep_count(torch.utils.data.Dataset):
             csv_path = f"datasets/repcount/train_with_fps.csv"
         else:
             csv_path = f"datasets/repcount/test_with_fps.csv"
-
-
         self.df = pd.read_csv(csv_path)
         if self.split == 'train':
             self.df = self.df[self.df['count'].notna()]
