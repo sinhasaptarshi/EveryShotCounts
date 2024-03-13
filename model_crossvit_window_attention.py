@@ -316,41 +316,6 @@ class Mlp(nn.Module):
         x = self.drop2(x)
         return x
 
-# class Attention(nn.Module):
-#     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
-#         super().__init__()
-#         self.num_heads = num_heads
-#         head_dim = dim // num_heads
-#         # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
-#         self.scale = qk_scale or head_dim ** -0.5
-
-#         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-#         # self.q = nn.Linear(dim, dim, bias=qkv_bias)
-#         # self.k = nn.Linear(dim, dim, bias=qkv_bias)
-#         # self.v = nn.Linear(dim, dim, bias=qkv_bias)
-#         self.attn_drop = nn.Dropout(attn_drop)
-#         self.proj = nn.Linear(dim, dim)
-#         self.proj_drop = nn.Dropout(proj_drop)
-
-#     def forward(self, x):
-#         B, N, C = x.shape
-#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-#         # q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).reshape(0,2,1,3)
-#         # k = self.k(x).reshape(B, N, self.num_heads, C // self.num_heads).reshape(0,2,1,3)
-#         # v = self.v(x).reshape(B, N, self.num_heads, C // self.num_heads).reshape(0,2,1,3)
-#         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
-#         # print('q',q)
-#         # print('k', k)
-#         # print('v', v)
-#         attn = (q @ k.transpose(-2, -1)) * self.scale
-#         attn = attn.softmax(dim=-1)
-#         attn = self.attn_drop(attn)
-#         # print(attn)
-#         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-#         x = self.proj(x)
-#         x = self.proj_drop(x)
-#         return x
-
 class CrossAttentionB(nn.Module):
     def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
         super().__init__()
@@ -437,48 +402,36 @@ class CrossAttentionBlock(nn.Module):
         
         self.norm0 = norm_layer(dim)
         self.selfattn = SelfAttention(dim)
-        # self.selfattn = Attention(
-        #     dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        
         self.drop_path0 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         
         self.norm1 = norm_layer(dim)
         self.attn = CrossAttentionB(dim)
 
-        # self.attn = CrossAttention(
-            # dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
         self.norm2 = norm_layer(dim)
-        # self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
         self.mlp = FeedForward(dim, int(dim * mlp_ratio), dropout=0.0)
         self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.iterative_shots = iterative_shots
         self.no_exemplars = no_exemplars
 
     def forward(self, x, y, shot_num=1):
-        # x = x + self.drop_path0(self.selfattn(self.norm0(x)))
         x = x + self.drop_path0(self.selfattn(x))
-        # y = y + self.drop_path0(self.selfattn(self.norm0(y)))
         if not self.no_exemplars:
             x_few = []
             if self.iterative_shots:
-                # print(shot_num)
+
                 for i in range(shot_num): #running iterations over shots
                     nt = y.shape[1] // shot_num   ##number of example tokens per example
                     yi = y[:, (i*nt):((i+1)*nt)]  ##separating example tokens
-                    # print(i, yi.shape)
-                    # xi = x + self.drop_path1(self.attn(self.norm1(x), yi)) ### cross attention between x and each example
-                    # xi = self.drop_path1(self.attn(self.norm1(x), yi))
-                    xi = self.drop_path1(self.attn(x, yi))
+                    xi = self.drop_path1(self.attn(x, yi))  ### cross-attending between exemplars and video
                     x_few.append(xi)   
                 x = x + torch.stack(x_few).mean(0)
-                # x = torch.stack(x_few).mean(0)
             else:
                 x = x + self.drop_path1(self.attn(self.norm1(x), y))
-            
-        # x = self.drop_path1(self.attn(self.norm1(x), y))
-        # x = x + self.drop_path2(self.mlp(self.norm2(x)))
         x = x + self.drop_path2(self.mlp(x))
         return x
 
@@ -589,39 +542,3 @@ class WindowedSelfAttention(nn.Module):
             x = self.forward_part2(x)
 
         return x
-
-
-# class SelfAttentionBlock(nn.Module):
-
-#     def __init__(
-#             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-#             drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
-#         super().__init__()
-        
-#         self.norm0 = norm_layer(dim)
-#         self.selfattn = SelfAttention(dim)
-#         # self.selfattn = Attention(
-#         #     dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-#         self.drop_path0 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        
-#         self.norm1 = norm_layer(dim)
-#         self.norm2 = norm_layer(dim)
-#         # self.attn = CrossAttention(
-#         #     dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-#         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-#         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
-#         # self.norm2 = norm_layer(dim)
-#         self.mlp = FeedForward(dim, int(dim*mlp_ratio), dropout=0.0)
-#         # self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
-#         # self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-#         # self.iterative_shots = iterative_shots
-
-#     # def forward(self, x):
-#     #     # x = self.drop_path0(self.selfattn(self.norm0(x)))
-#     #     x = self.drop_path0(self.selfattn(x))
-#     #     x = self.drop_path1(self.mlp(x))
-#     #     return self.norm0(x)
-#     #     # return x
-
-
