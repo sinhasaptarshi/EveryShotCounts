@@ -35,11 +35,21 @@ def get_args_parser():
     return parser
 
 def save_exemplar(dataloaders, model, args):
+    '''
+     This function extracts the encodings for every repetition in each video by uniformly sampling 16 frames
+     within the repetition segments and saves these encodings as npz format. The input to the encoder is 
+     B*3xTxHxW, where B is the total number of repetitions in the selected video. The output is spatio-temporal 
+     tokens of shape Bx(T'H'W')xC. We save these encodigns as BxCxT'xH'xW'.
+     inputs: a dict consisting of 'train', 'val' and 'test' dataloaders, 
+             the pretrained model,
+             other parameters needed 
+    '''
+
     if args.model == '3D-ResNeXt101':
         num_frames = 64
     else:
         num_frames = 16
-    if args.dataset == 'UCFRep':
+    if args.dataset == 'UCFRep': ###UCFRep has train and val splits only
         splits = ['train', 'val']
     else:
         splits = ['train', 'val', 'test']
@@ -47,67 +57,30 @@ def save_exemplar(dataloaders, model, args):
     for split in splits:
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
-            # print(video.shape)
-            # print(video.max())
-            # print(video.min())
-            # print(video.mean())
             starts = item[-3][0]
             ends = item[-2][0]
-            # print(starts)
             video_name = item[-1][0]
-            print(video_name)
-            # if os.path.exists('exemplar_maetokens_repcount/{}.npz'.format(video_name)):
-            #     continue
             C, T, H, W = video.shape
             
 
             clip_list = []
             num_exemplars = len(starts)
-            # print(num_exemplars)
-            # if split == 'train':
             for j in range(num_exemplars):
-                # peak = (starts[j].item() + ends[j].item())//2
-                # length = (ends[j].item() - starts[j].item())
-                # s, e = peak - length // 4, peak + length // 4
-                s = starts[j].item()
-                e = ends[j].item()
+                s = starts[j].item()  ## start times of each repetition
+                e = ends[j].item()  ## end times of each repetition
                 if s==e:
                     continue
-                idx = np.linspace(s, min(e, video.shape[1]-1), num_frames+1)[:num_frames].astype(int)
+                idx = np.linspace(s, min(e, video.shape[1]-1), num_frames+1)[:num_frames].astype(int) ###sample 16 frames from the repetition segment defined by the start and end
                 clips = video[:, idx]
                 clip_list.append(clips)
-            # else:
-            #     idx = np.linspace(starts[0].item(), ends[0].item(), 16)
-            #     clips = video[:, idx]
-            #     clip_list.append(clips)
-            
-            data = torch.stack(clip_list).cuda()
-            # print(data.shape)
+            data = torch.stack(clip_list).cuda()  ### batch of repetitions
             with torch.no_grad():
-                with torch.cuda.amp.autocast(enabled=True):
-                    '''
-                    if data.shape[0] > 64:
-                        encoded, thw = [], []
-                        ids = [ix for ix in range(64,data.shape[0],64)]
-                        if data.shape[0] - ids[-1] > 0:
-                            ids.append(data.shape[0])
-                        ids_s = [ix for ix in range(0,data.shape[0],64)]
-                        for id_s,id_f in zip(ids_s,ids):
-                            enc,thw_ = model(data[id_s:id_f,...])
-                            encoded.append(enc)
-                            thw.append(thw_)
-                        encoded =  torch.cat(encoded,dim=0)
-                        thw = thw[0]
-                    else:
-                    '''
-                    if args.model == 'VideoMAE':
-                        encoded, thw = model(data)
-                        encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
-                    else:
-                        encoded = model(data)
-                        # thw = encoded.shape[-3:]
-                    
-            # print(encoded.shape)
+                if args.model == 'VideoMAE':
+                    encoded, thw = model(data) ## extract encodings
+                    encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
+                else:
+                    encoded = model(data)
+
             
             enc_np = encoded.cpu().numpy()
             del encoded, data
@@ -116,14 +89,24 @@ def save_exemplar(dataloaders, model, args):
             if not os.path.isdir(target_dir):
                 os.makedirs(target_dir)
                 
-            np.savez('{}/{}.npz'.format(target_dir, video_name), enc_np)
+            np.savez('{}/{}.npz'.format(target_dir, video_name), enc_np) ##save as npz
 
 def save_tokens(dataloaders, model, args):
+    '''
+     This function extracts the encodings for each video using windows of 64 frames and then sampling 16 frames uniformly
+      from these windows. We save the encodings npz format. The input to the encoder is B*3x16xHxW, where B is the batch size 
+      and each batch comprises of overlapping windows in each videp. The output is spatio-temporal tokens of shape Bx(T'H'W')xC. We 
+     save these encodigns as BxCxT'xH'xW'.
+     inputs: a dict consisting of 'train', 'val' and 'test' dataloaders, 
+             the pretrained model,
+             other parameters needed 
+    '''
+
     if args.model == '3D-ResNeXt101':
         num_frames = 64
     else:
         num_frames = 16
-    if args.dataset == 'UCFRep':
+    if args.dataset == 'UCFRep': ### UCFRep has train and val splits only
         splits = ['train', 'val']
     else:
         splits = ['train', 'val', 'test']
@@ -135,35 +118,24 @@ def save_tokens(dataloaders, model, args):
         for item in tqdm.tqdm(dataloaders[split],total=len(dataloaders[split])):
             video = item[0].squeeze(0)
             video_name = item[-1][0]
-            print(video_name)
-            # if os.path.exists('saved_maetokens_repcount/{}.npz'.format(video_name)):
-            #     continue
-            # if video_name != 'stu8_4.mp4':
-            #     pass
-            # print(video_name)
             C, T, H, W = video.shape
-            padding = torch.zeros([C, 64, H, W])
+            padding = torch.zeros([C, 64, H, W]) ### add padding of zeros at the end
             video = torch.cat([video, padding], 1)
 
             clip_list = []
             n_frames = T
             for j in range(0, T, 16): #### 75% overlap
-                idx = np.linspace(j, j+64, num_frames+1)[:num_frames].astype(int)
+                idx = np.linspace(j, j+64, num_frames+1)[:num_frames].astype(int) ### sample 16 frames from windows of 64 frames
                 clips = video[:,idx]
                 clip_list.append(clips)
             data = torch.stack(clip_list).cuda()
-            # print(data)
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=True):
                     if args.model == 'VideoMAE':
-                        encoded, thw = model(data)
+                        encoded, thw = model(data)  ### extract encodings
                         encoded = encoded.transpose(1, 2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2]) # reshape to B x C x T x H x W
                     else:
                         encoded = model(data)
-                        # print(encoded.shape)
-                        # thw = encoded.shape[-3:]
-                    
-            # print(encoded.shape)
             enc_np = encoded.cpu().numpy()
             del encoded, data
             torch.cuda.empty_cache()
@@ -172,7 +144,7 @@ def save_tokens(dataloaders, model, args):
                 print('Creating folder')
                 os.makedirs(target_dir)
             
-            np.savez('{}/{}.npz'.format(target_dir, video_name), enc_np)
+            np.savez('{}/{}.npz'.format(target_dir, video_name), enc_np) ### saving as npz
 
 
 def main():
@@ -182,28 +154,14 @@ def main():
     args.save_video_encodings = not args.save_exemplar_encodings
 
     cfg = load_config(args, path_to_config='pretrain_config.yaml')
-    if args.model == 'VideoMAE':
+    if args.model == 'VideoMAE': ### for videomae-based encoder (recommended)
         
         model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False, encodings=args.encodings).cuda()
-        # if args.pretrained_encoder:
-        state_dict = torch.load(args.pretrained_encoder)['model_state']
-        #state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']
+        if args.pretrained_encoder:
+            state_dict = torch.load(args.pretrained_encoder)['model_state']
+        else:
+            state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']   ##pretrained on Kinetics
         model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
-        # for name, param in state_dict.items():
-        # #     # print(name)
-        #     if args.num_gpus > 1:
-        #         name = f'module.{name}'
-        #     if name in model.state_dict().keys():
-        #         continue
-        #     else:
-        #         print(name)
-        #         # if 'decoder' not in name:
-        #             print(name)
-        #             # new_name = name.replace('quantizer.', '')
-        #             try:
-        #                 model.state_dict()[name].copy_(param)
-        #             except:
-        #                 print(f"parameters {name} not found")
         print(state_dict.keys())
         for name in model.state_dict().keys():
             if 'decoder' in name:
@@ -227,32 +185,23 @@ def main():
                     break
             if matched == 0:
                 print(f"parameters {name} not found")
-            # else:
-            #     print(f"parameters {name} found")
 
-    elif args.model == 'VideoSwin':
+    elif args.model == 'VideoSwin':   ###for swin-based encoder
         config = './configs/recognition/swin/swin_tiny_patch244_window877_kinetics400_1k.py'
         checkpoint = './pretrained_models/swin_tiny_patch244_window877_kinetics400_1k.pth'
         model_cfg = Config.fromfile(config)
         model = build_model(model_cfg.model, train_cfg=model_cfg.get('train_cfg'), test_cfg=model_cfg.get('test_cfg'))
-        # model = nn.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
-        # print(model.backbone.layers[0].blocks[0].attn.qkv.weight.data)
-
         load_checkpoint(model, checkpoint, map_location='cpu')
-        # print(model.backbone.layers[0].blocks[0].attn.qkv.weight.data)
 
         backbone = model.backbone
         backbone = backbone.cuda()
         model = nn.DataParallel(backbone, device_ids=[i for i in range(args.num_gpus)])
-        # print(model.module.layers[0].blocks[0].attn.qkv.weight.data)
 
-    elif args.model == '3D-ResNeXt101':
+    elif args.model == '3D-ResNeXt101':  ## for resnext based encoder
         model = resnext.resnet101(num_classes=400, sample_size=224, sample_duration=64, last_fc=False)
         model = model.cuda()
         model = nn.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
         model.load_state_dict(torch.load('pretrained_models/resnext-101-64f-kinetics.pth')['state_dict'])
-        
-        # model.load_state_dict(torch.load('results/0208-23:40_2stream/save_62.pth')['state_dict'], strict=False)
         
 
     model.eval()
