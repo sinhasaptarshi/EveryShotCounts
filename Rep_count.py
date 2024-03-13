@@ -131,7 +131,6 @@ class Rep_count(torch.utils.data.Dataset):
     def __getitem__(self, index):
          
         video_name = f"{self.data_dir}/{self.split}/{self.df.iloc[index]['name']}"
-        cap = cv2.VideoCapture(video_name)
         
         row = self.df.iloc[index]
         duration = row['num_frames']
@@ -140,7 +139,7 @@ class Rep_count(torch.utils.data.Dataset):
         ends = clc[1::2]
         
         frame_idx = self.get_vid_clips(duration-1)   ### get frame indices
-        vid,  num_frames = read_video_timestamps(video_name, frame_idx, duration=duration-1)  ## return frames at the passed indices
+        vid, num_frames = read_video_timestamps(video_name, frame_idx, duration=duration-1)  ## return frames at the passed indices
         vdur = (frame_idx[-1] - frame_idx[0]) / row['fps']
         vid = self.transform(vid/255.)  
         return vid, starts, ends, self.df.iloc[index]['name'][:-4]
