@@ -51,14 +51,6 @@ class Rep_count(torch.utils.data.Dataset):
             csv_path = f"datasets/repcount/train_with_fps.csv"
         else:
             csv_path = f"datasets/repcount/test_with_fps.csv"
-        # csv_path = f"datasets/repcount/{self.split}_with_fps.csv"
-        types = self.train_df['type'].values
-        names = self.train_df['name'].values
-        for type in np.unique(types):
-            if type != 'others':
-                self.dict[type] = []
-        for type, name in zip(types, names):
-            self.dict[type].append(name)
 
 
         self.df = pd.read_csv(csv_path)
