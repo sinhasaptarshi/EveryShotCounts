@@ -17,7 +17,7 @@ import gdown
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE encoding', add_help=False)
-    parser.add_argument('--video_name', default='data/stu2_39.mp4', type=str,help='Demo video to infer on')
+    parser.add_argument('--video_name', default='data/test2021.mp4', type=str,help='Demo video to infer on')
     parser.add_argument('--resource', default='cpu', type=str, help='choose compute resource to use, e.g `cpu`,`cuda:0`,etc')
     parser.add_argument('--pool_tokens', default=0.4, type=float)
     parser.add_argument('--pretrained_encoder', default =None, type=str)
