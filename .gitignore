@@ -16,7 +16,6 @@
 *.pyth
 saved_tokens/
 saved_models/
-data/
 checkpoints/
 examplar_tokens/
 gt_density_maps/
@@ -49,4 +48,4 @@ QUVARepetitionDataset.tar.gz
 QUVARepetitionDataset/
 results/
 pytorchvideo
-detectron
+detectron2
