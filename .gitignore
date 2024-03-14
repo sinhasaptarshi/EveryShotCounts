@@ -40,8 +40,6 @@ saved_models_repcountfull/
 saved_models_subset/
 saved_models_nonormalizationbycounts/
 */*.pyth
-countix/
-countix_full/
 node_modules
 selected_videos/
 QUVARepetitionDataset.tar.gz
