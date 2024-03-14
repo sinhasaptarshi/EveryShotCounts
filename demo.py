@@ -4,23 +4,12 @@ torch.cuda.empty_cache()
 import numpy as np
 import os, sys
 import einops
-# from Rep_count_loader import Rep_count
-from Repcount_multishot_loader import Rep_count
-
-from Countix_multishot_loader import Countix
-from UCFRep_multishot_loader import UCFRep
-from tqdm import tqdm
 import cv2
-
 from video_mae_cross_full_attention import SupervisedMAE
 from slowfast.utils.parser import load_config
-import timm.optim.optim_factory as optim_factory
 import argparse
-import torch.optim as optim
-import math
 import av
-import random
-import pandas as pd
+import math
 from pytorchvideo.data.utils import thwc_to_cthw
 from pytorchvideo.transforms import create_video_transform
 from itertools import cycle, islice
@@ -111,7 +100,7 @@ def main():
                                         num_samples = None,
                                         video_mean = [0.485,0.456,0.406], 
                                         video_std = [0.229,0.224,0.225])
-    frame_idx = np.arange(0, num_frames + 1, 1)
+    frame_idx = np.arange(0, num_frames, 1)
 
     ### read frames from video
     vid_frames, _ = read_video_timestamps(video, frame_idx)
@@ -145,8 +134,8 @@ def main():
                     encoder.state_dict()[name].copy_(params)
                     matched = 1
                     break
-            if matched == 0:
-                print(f"parameters {name} not found")
+            # if matched == 0:
+            #     print(f"parameters {name} not found")
     
     ### encode video
     encoder.eval()
