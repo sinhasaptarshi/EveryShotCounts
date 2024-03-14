@@ -24,20 +24,18 @@ import pandas as pd
 from pytorchvideo.data.utils import thwc_to_cthw
 from pytorchvideo.transforms import create_video_transform
 from itertools import cycle, islice
-
+import gdown
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE encoding', add_help=False)
     parser.add_argument('--video_name', default='data/stu2_39.mp4', type=str,help='Demo video to infer on')
-    parser.add_argument('--num_gpus', default=0, type=int)
+    parser.add_argument('--resource', default='cpu', type=str, help='choose compute resource to use, e.g `cpu`,`cuda:0`,etc')
     parser.add_argument('--pool_tokens', default=0.4, type=float)
     parser.add_argument('--pretrained_encoder', default =None, type=str)
     parser.add_argument('--scale_counts', default=100)
-    parser.add_argument('--save_exemplar_encodings', default=False, type=bool)
     parser.add_argument('--dataset', default='Repcount', help='choose from [Repcount, Countix, UCFRep]', type=str)
     parser.add_argument('--model', default='VideoMAE', help="VideoMAE, VideoSwin")
     parser.add_argument('--encodings', default='mae', help="mae, swin, resnext")
-    parser.add_argument('--data_path', default='', help='data path for the dataset')
     return parser
 
 def extract_tokens(video, model, args, num_frames=16):
@@ -49,12 +47,12 @@ def extract_tokens(video, model, args, num_frames=16):
         idx = np.linspace(j, j+64, num_frames+1)[:num_frames].astype(int)
         clips = video[:, idx]
         clip_list.append(clips)
-    data = torch.stack(clip_list)
-    if args.num_gpus > 0:
-        data = data.cuda()
-    with torch.no_grad():
-        encoded, thw = model(data)  ## extract encodings
-        encoded = encoded.transpose(1,2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2])
+    data = torch.stack(clip_list).to(args.resource)
+    dtype = 'cuda' if 'cuda' in args.resource else 'cpu'
+    with torch.autocast(device_type=dtype):
+        with torch.no_grad():
+            encoded, thw = model(data)  ## extract encodings
+            encoded = encoded.transpose(1,2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2])
     del data
     return encoded
 
@@ -105,7 +103,6 @@ def main():
     video = args.video_name
     cap = cv2.VideoCapture(video)
     num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print(num_frames)
     cap.release()
     transform =  create_video_transform(mode="test",
                                         convert_to_float=False,
@@ -124,21 +121,18 @@ def main():
     
     cfg = load_config(args, path_to_config='configs/pretrain_config.yaml')
     encoder = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False, encodings=args.encodings)
-    if args.num_gpus > 0:
-        encoder = encoder.cuda()
+    encoder = encoder.to(args.resource)
     if args.pretrained_encoder:
         state_dict = torch.load(args.pretrained_encoder)['model_state']
     else:
-        state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth', map_location='cpu')['model_state']   ##pretrained on Kinetics
+        state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth', map_location=args.resource)['model_state']   ##pretrained on Kinetics
     
     for name in encoder.state_dict().keys():
-            if 'decoder' in name:
+            if 'decode' in name:
                 continue
             matched = 0
 
             for name_, param in state_dict.items():
-                if args.num_gpus > 1:
-                    name_ = f'module.{name_}'
                 if name_ == name:
                     encoder.state_dict()[name].copy_(param)
                     matched = 1
@@ -163,19 +157,29 @@ def main():
     if args.pool_tokens < 1.0:
         factor = math.ceil(encoded.shape[-1] * args.pool_tokens)
         tokens = torch.nn.functional.adaptive_avg_pool3d(encoded, (encoded.shape[-3], factor, factor))
-    print(encoded.shape)
 
     decoder = SupervisedMAE(cfg=cfg,use_precomputed=True, token_pool_ratio=0.4, iterative_shots=True, encodings='mae', no_exemplars=False, window_size=(4,7,7))
-    if args.num_gpus > 0:
-        decoder = decoder.cuda()
-    decoder.load_state_dict(torch.load('repcount_trained.pyth', map_location='cpu')['model_state_dict'])
+    decoder = decoder.to(args.resource)
+    
+    print('---- loading pretrained model ----')
+    output = 'pretrainedmodel.pyth'
+    if not os.path.isfile(output):
+        if args.model=='VideoMAE':
+            url = 'https://drive.google.com/uc?id=1cwUtgUM0XotOx5fM4v4ZU29hlKUxze48'
+        else:
+            url = 'https://drive.google.com/uc?id=1cwUtgUM0XotOx5fM4v4ZU29hlKUxze48'
+        gdown.download(url, output, quiet=False)
+    decoder.load_state_dict(torch.load(output, map_location=args.resource)['model_state_dict'])
 
     ##placeholder exemplar
     tokens = tokens.unsqueeze(0)
     shapes = tokens.shape[-3:]
     tokens = einops.rearrange(tokens, 'B C T H W -> B (T H W) C')
     # print(tokens.shape)
-    predicted_density_map = decoder(tokens, thw=[shapes,], shot_num=0)
+    dtype = 'cuda' if 'cuda' in args.resource else 'cpu'
+    with torch.autocast(device_type=dtype):
+        with torch.no_grad():
+            predicted_density_map = decoder(tokens, thw=[shapes,], shot_num=0)
     # print(pred.shape)
     predicted_counts = predicted_density_map.sum().item()/args.scale_counts
     print(f'The number of repetitions is {round(predicted_counts)}')
