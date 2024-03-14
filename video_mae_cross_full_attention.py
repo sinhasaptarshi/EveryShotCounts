@@ -299,7 +299,7 @@ class SupervisedMAE(nn.Module):
 
         # --------------------------------------------------------------------------
         # MAE decoder specifics
-        print('Embed Dim', embed_dim)
+        # print('Embed Dim', embed_dim)
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
         spatial_tokens = math.ceil(token_pool_ratio * 14) if encodings == 'mae' else math.ceil(token_pool_ratio * 7)

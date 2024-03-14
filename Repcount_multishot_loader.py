@@ -45,10 +45,7 @@ class Rep_count(torch.utils.data.Dataset):
         self.multishot = multishot
         self.density_peak_width = density_peak_width
         self.threshold = threshold ## cutoff to decide if we should select exemplar from other videos of same class
-        if self.split == 'train':
-            csv_path = f"datasets/repcount/train_with_fps.csv"
-        else:
-            csv_path = f"datasets/repcount/test_with_fps.csv"
+        csv_path = f'datasets/repcount/{self.split}_with_fps.csv'
         self.df = pd.read_csv(csv_path)
         if self.split == 'train':
             self.df = self.df[self.df['count'].notna()]

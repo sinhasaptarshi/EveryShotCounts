@@ -9,7 +9,7 @@ from Repcount_multishot_loader import Rep_count
 from Countix_multishot_loader import Countix
 from UCFRep_multishot_loader import UCFRep
 from tqdm import tqdm
-from video_mae_cross_full_attention import SupervisedMAE as SupervisedMAE_fullattention
+from video_mae_cross_full_attention import SupervisedMAE
 from slowfast.utils.parser import load_config
 import timm.optim.optim_factory as optim_factory
 import argparse
@@ -39,7 +39,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=300, type=int)
-    parser.add_argument('--encodings', default='swin', type=str, help=['swin','mae'])
+    parser.add_argument('--encodings', default='mae', type=str, help=['swin','mae'])
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--only_test', action='store_true',
@@ -50,67 +50,39 @@ def get_args_parser():
 
     parser.add_argument('--dataset', default='RepCount', type=str, help='Repcount, Countix, UCFRep')
 
-    parser.add_argument('--get_overlapping_segments', default=False, type=bool, help='whether to get overlapping segments')
+    parser.add_argument('--get_overlapping_segments', action='store_true', help='whether to get overlapping segments')
 
     parser.add_argument('--peak_at_random_locations', default=False, type=bool, help='whether to have density peaks at random locations')
 
     parser.add_argument('--multishot', action='store_true')
 
-    parser.add_argument('--full_attention', action='store_true')
 
     parser.add_argument('--iterative_shots', action='store_true', help='will show the examples one by one')
 
-    parser.add_argument('--no_exemplars', action='store_true', help='to not use exemplars')
 
-    parser.add_argument('--density_peak_width', default=1.0, type=float, help='sigma for the peak of density maps, lesser sigma gives sharp peaks')
+    parser.add_argument('--density_peak_width', default=0.5, type=float, help='sigma for the peak of density maps, lesser sigma gives sharp peaks')
 
 
     # Model parameters
-    parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
-                        help='Name of model to train')
     parser.add_argument('--save_path', default='./saved_models_repcountfull', type=str, help="Path to save the model")
-
-    parser.add_argument('--mask_ratio', default=0.5, type=float,
-                        help='Masking ratio (percentage of removed patches).')
-
-    parser.add_argument('--norm_pix_loss', action='store_true',
-                        help='Use (per-patch) normalized pixels as targets for computing loss')
-    
-    parser.set_defaults(norm_pix_loss=False)
-
-    parser.add_argument('--use_mae', action='store_true', help='Use mean absolute error as a loss function')
-
-    parser.set_defaults(use_mae=True)
 
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0.05)')
     parser.add_argument('--lr', type=float, default=5e-6, metavar='LR',
                         help='learning rate (peaklr)')
-    parser.add_argument('--init_lr', type=float, default=8e-6, metavar='LR',
-                        help='learning rate (initial lr)')
-    parser.add_argument('--peak_lr', type=float, default=8e-6, metavar='LR',
-                        help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
-    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
-                        help='lower lr bound for cyclic schedulers that hit 0')
-    parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
-                        help='epochs to warmup LR')
-    parser.add_argument('--decay_milestones', type=list, default=[80, 160], help='milestones to decay for step decay function')
     parser.add_argument('--eval_freq', default=2, type=int)
-    parser.add_argument('--cosine_decay', default=True, type=bool)
 
     # Dataset parameters
     parser.add_argument('--precomputed', default=True, type=lambda x: (str(x).lower() == 'true'),
                         help='flag to specify if precomputed tokens will be loaded')
-    parser.add_argument('--data_path', default='/raid/local_scratch/sxs63-wwp01/', type=str,
+    parser.add_argument('--data_path', default='', type=str,
                         help='dataset path')
     parser.add_argument('--slurm_job_id', default=None, type=str,
                         help='job id')
     parser.add_argument('--tokens_dir', default='saved_tokens_reencoded', type=str,
                         help='ground truth density map directory')
     parser.add_argument('--exemplar_dir', default='exemplar_tokens_reencoded', type=str,
-                        help='ground truth density map directory')
-    parser.add_argument('--gt_dir', default='gt_density_maps_recreated', type=str,
                         help='ground truth density map directory')
     parser.add_argument('--threshold', default=0.0, type=float,
                         help='p, cut off to decide if select exemplar from different video')
@@ -123,8 +95,6 @@ def get_args_parser():
     
     parser.add_argument('--pretrained_encoder', default='pretrained_models/VIT_B_16x4_MAE_PT.pyth', type=str)
 
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
-                        help='start epoch')
     parser.add_argument('--num_workers', default=4, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
@@ -132,12 +102,6 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     # Distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--local_rank', default=-1, type=int)
-    parser.add_argument('--dist_on_itp', action='store_true')
-    parser.add_argument('--dist_url', default='env://',
-                        help='url used to set up distributed training')
     parser.add_argument('--num_gpus', default=4, type=int, help='number of gpus')
 
     # Logging parameters
@@ -149,7 +113,7 @@ def get_args_parser():
     parser.add_argument("--team", default="", type=str)
     parser.add_argument("--wandb_id", default='', type=str)
     
-    parser.add_argument("--token_pool_ratio", default=0.6, type=float)
+    parser.add_argument("--token_pool_ratio", default=0.4, type=float)
     parser.add_argument("--rho", default=0.7, type=float)
     parser.add_argument("--window_size", default=(4,7,7), type=int, nargs='+', help='window size for windowed self attention')
 
@@ -175,19 +139,18 @@ def main():
             dataset_train = Countix(split="train",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
                                     peak_at_random_location=args.peak_at_random_locations,
                                     get_overlapping_segments=args.get_overlapping_segments,
                                     multishot=args.multishot,
-                                    encodings=args.encodings)
+                                    encodings=args.encodings,
+                                    threshold=args.threshold)
             
             dataset_valid = Countix(split="val",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -198,7 +161,6 @@ def main():
             dataset_test = Countix(split="test",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -210,7 +172,6 @@ def main():
             dataset_train = Rep_count(split="train",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -222,7 +183,6 @@ def main():
             dataset_valid = Rep_count(split="valid",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -233,7 +193,6 @@ def main():
             dataset_test = Rep_count(split="test",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -246,7 +205,6 @@ def main():
             dataset_train = UCFRep(split="train",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -258,7 +216,6 @@ def main():
             dataset_valid = UCFRep(split="valid",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -269,7 +226,6 @@ def main():
             dataset_test = UCFRep(split="test",
                                     tokens_dir = args.tokens_dir,
                                     exemplar_dir = args.exemplar_dir,
-                                    density_maps_dir = args.gt_dir,
                                     select_rand_segment=False, 
                                     compact=True, 
                                     pool_tokens_factor=args.token_pool_ratio,
@@ -309,10 +265,9 @@ def main():
               
     # scaler = torch.cuda.amp.GradScaler() # use mixed percision for efficiency
     # scaler = NativeScaler()
-    if args.full_attention:
-        model = SupervisedMAE_fullattention(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, no_exemplars=args.no_exemplars, window_size=args.window_size).cuda() 
-    else:
-        model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, no_exemplars=args.no_exemplars).cuda()
+    model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, window_size=args.window_size).cuda() 
+    # else:
+    #     model = SupervisedMAE(cfg=cfg,use_precomputed=args.precomputed, token_pool_ratio=args.token_pool_ratio, iterative_shots=args.iterative_shots, encodings=args.encodings, no_exemplars=args.no_exemplars).cuda()
     if args.num_gpus > 1:
         model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
     
@@ -394,7 +349,7 @@ def main():
                         resume="allow",
                         project=args.wandb,
                         entity=args.team,
-                        id=f"{args.wandb_id}_{args.dataset}_{args.encodings}_{args.lr}_fullattention{args.full_attention}_{args.threshold}_{args.slurm_job_id}",
+                        id=f"{args.wandb_id}_{args.dataset}_{args.encodings}_{args.lr}_{args.threshold}",
                     )
     param_groups = optim_factory.add_weight_decay(model, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))

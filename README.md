@@ -56,4 +56,28 @@ Again, this will create the folder `exemplar_VideoMAEtokens_RepCount` with token
 
 # Train ESCounts
 
-`python exemplar_counting_train.py --num_gpus 1 --dataset RepCount --tokens_dir saved_VideoMAEtokens_RepCount --exemplar_dir exemplar_VideoMAEtokens_RepCount --save_path saved_models_repcount_swin_attndecoder477_lr5e-5_threshold0.4 --token_pool_ratio 0.9 --multishot --iterative_shots --lr 5e-5 --encodings swin --threshold 0.4 --full_attention --window_size 4 7 7`
+To train with ESCounts on the encoded tokens, use
+
+`python exemplar_counting_train.py --num_gpus 1 --dataset RepCount --tokens_dir saved_VideoMAEtokens_RepCount --exemplar_dir exemplar_VideoMAEtokens_RepCount --save_path saved_models_repcount --token_pool_ratio 0.4 --multishot --iterative_shots --lr 5e-5 --encodings mae --threshold 0.4`
+
+This will save checkpoints in the `save_path`. `--threshold 0.4` uses exemplars from different videos of same actions with probability of 0.4. `--token_pool_ratio 0.4` downsamples encoded spatio-temporal tokens by spatial average pooling in order to fit in memory. `--token_pool_ratio 1.0` uses no spatial average pooling. Modify this during inference appropriately.
+
+
+# Testing
+
+
+To run inference with trained checkpoint, run
+
+`python exemplar_counting_train.py --dataset RepCount --tokens_dir saved_VideoMAEtokens_RepCount --exemplar_dir exemplar_VideoMAEtokens_RepCount --trained_model xxxxx.pyth --multishot --iterative_shots --get_overlapping_segments`
+
+Replace `xxxxx.pyth` with the trained checkpoints.
+
+You can download our trained model from [here](https://drive.google.com/file/d/1cwUtgUM0XotOx5fM4v4ZU29hlKUxze48/view?usp=drive_link) 
+
+
+# Run Demo
+To run demo on any video `data/xxxx.mp4` with our trained model, use the following:
+
+`python demo.py --video_name data/xxxx.mp4 --resource 'cpu'`
+
+Change the resource accordingly. 

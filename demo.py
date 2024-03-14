@@ -38,7 +38,7 @@ def extract_tokens(video, model, args, num_frames=16):
         clip_list.append(clips)
     data = torch.stack(clip_list).to(args.resource)
     dtype = 'cuda' if 'cuda' in args.resource else 'cpu'
-    with torch.autocast(device_type=dtype):
+    with torch.autocast(enabled='cuda' in args.resource, device_type=dtype):
         with torch.no_grad():
             encoded, thw = model(data)  ## extract encodings
             encoded = encoded.transpose(1,2).reshape(encoded.shape[0], encoded.shape[-1], thw[0], thw[1], thw[2])
@@ -151,7 +151,7 @@ def main():
     decoder = decoder.to(args.resource)
     
     print('---- loading pretrained model ----')
-    output = 'pretrainedmodel.pyth'
+    output = 'repcount_trained.pyth'
     if not os.path.isfile(output):
         if args.model=='VideoMAE':
             url = 'https://drive.google.com/uc?id=1cwUtgUM0XotOx5fM4v4ZU29hlKUxze48'
@@ -166,7 +166,7 @@ def main():
     tokens = einops.rearrange(tokens, 'B C T H W -> B (T H W) C')
     # print(tokens.shape)
     dtype = 'cuda' if 'cuda' in args.resource else 'cpu'
-    with torch.autocast(device_type=dtype):
+    with torch.autocast(enabled='cuda' in args.resource, device_type=dtype):
         with torch.no_grad():
             predicted_density_map = decoder(tokens, thw=[shapes,], shot_num=0)
     # print(pred.shape)
