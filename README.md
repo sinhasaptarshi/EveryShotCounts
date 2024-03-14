@@ -81,3 +81,4 @@ To run demo on any video `data/xxxx.mp4` with our trained model, use the followi
 `python demo.py --video_name data/xxxx.mp4 --resource 'cpu'`
 
 Change the resource accordingly. 
+The output should be like `The number of repetitions is $x$`.
