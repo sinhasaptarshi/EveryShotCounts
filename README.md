@@ -88,7 +88,8 @@ Change the resource accordingly.
 The output should be like `The number of repetitions is $x$`.
 
 
-If you find this helpful, please consider citing our paper as 
+# Citation
+If you find ESCounts helpful, please consider citing our paper as 
 
 ```
 @InProceedings{sinha2024every,
