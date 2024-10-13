@@ -1,8 +1,11 @@
-This is the codebase for the paper "Every Shot Counts: Using Exemplars for Repetition Counting in Videos"
+This is the codebase for the paper "Every Shot Counts: Using Exemplars for Repetition Counting in Videos" 
 
 [Saptarshi Sinha](https://sinhasaptarshi.github.io), [Alexandros Stergiou](https://alexandrosstergiou.github.io) and [Dima Damen](https://dimadamen.github.io)
 
+
 [Proceedings of the Asian conference on computer vision (ACCV) 2024](https://accv2024.org)
+
+Links: [[arXiv]](https://arxiv.org/abs/2403.18074) [[webpage]](https://sinhasaptarshi.github.io/escounts/)
 
 ![supported versions](https://img.shields.io/badge/python-3.x-brightgreen/?style=flat&logo=python&color=green)
 ![Library](https://img.shields.io/badge/library-PyTorch-blue/?style=flat&logo=pytorch&color=informational)
