@@ -1,5 +1,9 @@
 This is the codebase for the paper "Every Shot Counts: Using Exemplars for Repetition Counting in Videos"
 
+[Saptarshi Sinha](https://sinhasaptarshi.github.io), [Alexandros Stergiou](https://alexandrosstergiou.github.io) and [Dima Damen](https://dimadamen.github.io)
+
+[Proceedings of the Asian conference on computer vision (ACCV) 2024](https://accv2024.org)
+
 ![supported versions](https://img.shields.io/badge/python-3.x-brightgreen/?style=flat&logo=python&color=green)
 ![Library](https://img.shields.io/badge/library-PyTorch-blue/?style=flat&logo=pytorch&color=informational)
 ![GitHub license](https://img.shields.io/cocoapods/l/AFNetworking)
@@ -82,3 +86,15 @@ To run demo on any video `data/xxxx.mp4` with our trained model, use the followi
 
 Change the resource accordingly. 
 The output should be like `The number of repetitions is $x$`.
+
+
+If you find this helpful, please consider citing our paper as 
+
+```
+@InProceedings{sinha2024every,
+title = {Every Shot Counts: Using Exemplars for Repetition Counting in Videos},
+author = {Sinha, Saptarshi and Stergiou, Alexandros and Damen, Dima},
+booktitle={Proceedings of the Asian conference on computer vision (ACCV)},
+year = {2024},
+}
+```
