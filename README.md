@@ -58,6 +58,12 @@ Install the required packages
 
 `pip install timm`
 
+`pip install -U openmim`
+
+`mim install mmcv-full`
+
+
+
 # Dataset Download
 
 Download the Repcount dataset from [here](https://svip-lab.github.io/dataset/RepCount_dataset.html) under `data/RepCount` 
