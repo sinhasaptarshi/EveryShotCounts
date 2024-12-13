@@ -62,6 +62,7 @@ Install the required packages
 
 `mim install mmcv-full`
 
+You don't need to install mmaction anymore. It is already provided in the repo as a folder.
 
 
 # Dataset Download
