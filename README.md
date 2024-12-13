@@ -32,7 +32,31 @@ Create a conda environment and activate it.
 
 Install the required packages
 
-`pip install -r requirements.txt`
+`pip install av==10.0.0`
+
+`pip install einops==0.3.2`
+
+`pip install numpy`
+
+`pip install opencv-python==4.8.1.78`
+
+`pip install pandas`
+
+`pip install -e git+https://github.com/facebookresearch/pytorchvideo.git@fae0d89a194a2c1ca99e59eab6eedd40bde38726#egg=pytorchvideo`
+
+`pip install tqdm==4.59.0`
+
+`pip install torch==1.10.0+cu111 torchvision==0.11.0+cu111 torchaudio==0.10.0 -f https://download.pytorch.org/whl/torch_stable.html`
+
+`pip install simplejson`
+
+`python -m pip install detectron2 -f   https://dl.fbaipublicfiles.com/detectron2/wheels/cu111/torch1.10/index.html`
+
+`pip install psutil`
+
+`pip install scikit-image`
+
+`pip install timm`
 
 # Dataset Download
 

@@ -161,16 +161,19 @@ def main():
             state_dict = torch.load(args.pretrained_encoder)['model_state']
         else:
             state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']   ##pretrained on Kinetics
+        # print(model)
+        
         model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
-        print(state_dict.keys())
+        # print(model)
+        # print(state_dict.keys())
         for name in model.state_dict().keys():
-            if 'decoder' in name:
+            if 'decoder' in name or 'decode_heads' in name:
                 continue
             matched = 0
 
             for name_, param in state_dict.items():
-                if args.num_gpus > 1:
-                    name_ = f'module.{name_}'
+                # if args.num_gpus > 1:
+                name_ = f'module.{name_}'
                 if name_ == name:
                     model.state_dict()[name].copy_(param)
                     matched = 1
