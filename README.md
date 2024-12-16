@@ -106,7 +106,7 @@ This will save checkpoints in the `save_path`. `--threshold 0.4` uses exemplars 
 
 To run inference with trained checkpoint, run
 
-`python exemplar_counting_train.py --dataset RepCount --tokens_dir saved_VideoMAEtokens_RepCount --exemplar_dir exemplar_VideoMAEtokens_RepCount --trained_model xxxxx.pyth --multishot --iterative_shots --get_overlapping_segments`
+`python exemplar_counting_train.py --dataset RepCount --tokens_dir saved_VideoMAEtokens_RepCount --exemplar_dir exemplar_VideoMAEtokens_RepCount --trained_model xxxxx.pyth --multishot --iterative_shots --get_overlapping_segments --only_test`
 
 Replace `xxxxx.pyth` with the trained checkpoints.
 

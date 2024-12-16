@@ -17,7 +17,7 @@ import wandb
 import torch.optim as optim
 import math
 import random
-from util.lr_sched import adjust_learning_rate
+# from util.lr_sched import adjust_learning_rate
 import pandas as pd
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from scipy.signal import find_peaks
@@ -102,7 +102,7 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     # Distributed training parameters
-    parser.add_argument('--num_gpus', default=4, type=int, help='number of gpus')
+    parser.add_argument('--num_gpus', default=2, type=int, help='number of gpus')
 
     # Logging parameters
     parser.add_argument('--log_dir', default='./logs/fim6_dir',
@@ -129,7 +129,7 @@ def main():
     g = torch.Generator()
     g.manual_seed(args.seed)
     
-    cfg = load_config(args, path_to_config='pretrain_config.yaml')
+    cfg = load_config(args, path_to_config='configs/pretrain_config.yaml')
     
     '''
     create dataloaders
