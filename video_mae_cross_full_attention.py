@@ -227,14 +227,17 @@ class SupervisedMAE(nn.Module):
                         torch.zeros(1, 1, embed_dim)
                     )
             else:
-                self.pos_embed = nn.Parameter(
-                    torch.zeros(
-                        1,
-                        pos_embed_dim,
-                        embed_dim,
-                    ),
-                    requires_grad=not self.use_fixed_sincos_pos,
-                )
+                if self.use_fixed_sincos_pos:
+                    self.pos_embed = self.get_sinusoid_encoding_table(pos_embed_dim, embed_dim)
+                else:
+                    self.pos_embed = nn.Parameter(
+                        torch.zeros(
+                            1,
+                            pos_embed_dim,
+                            embed_dim,
+                        ),
+                        requires_grad=not self.use_fixed_sincos_pos,
+                    )
 
 
  
@@ -375,6 +378,20 @@ class SupervisedMAE(nn.Module):
         pe[:, 1::2] = torch.cos(k * div_term)
         pe = pe.unsqueeze(0) 
         return pe
+    
+    @torch.no_grad()
+    def get_sinusoid_encoding_table(self, n_position, d_hid): 
+        ''' Sinusoid position encoding table ''' 
+        # TODO: make it with torch instead of numpy 
+        def get_position_angle_vec(position): 
+            return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)] 
+
+        sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)]) 
+        sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2]) # dim 2i 
+        sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2]) # dim 2i+1 
+
+        return  torch.tensor(sinusoid_table,dtype=torch.float, requires_grad=False).unsqueeze(0) 
+
 
     def initialize_weights(self):
         # initialization

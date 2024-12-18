@@ -18,7 +18,7 @@ from video_mae_cross_full_attention import SupervisedMAE
 from slowfast.utils.parser import load_config
 import argparse
 from resnext_models import resnext
-
+import pdb
 import tqdm
 
 def get_args_parser():
@@ -32,6 +32,7 @@ def get_args_parser():
     parser.add_argument('--model', default='VideoMAE', help="VideoMAE, VideoSwin")
     parser.add_argument('--encodings', default='mae', help="mae, swin, resnext")
     parser.add_argument('--data_path', default='', help='data path for the dataset')
+    parser.add_argument('--use_v1', action='store_true', help='use the v1 variant of the encoder')
     return parser
 
 def save_exemplar(dataloaders, model, args):
@@ -152,33 +153,49 @@ def main():
     args = parser.parse_args()
     args.opts = None
     args.save_video_encodings = not args.save_exemplar_encodings
-
-    cfg = load_config(args, path_to_config='configs/pretrain_config.yaml')
+    if args.use_v1:
+        cfg = load_config(args, path_to_config='configs/pretrain_config_v1.yaml')
+    else:
+        cfg = load_config(args, path_to_config='configs/pretrain_config.yaml')
     if args.model == 'VideoMAE': ### for videomae-based encoder (recommended)
         
         model = SupervisedMAE(cfg=cfg, just_encode=True, use_precomputed=False, encodings=args.encodings).cuda()
         if args.pretrained_encoder:
-            state_dict = torch.load(args.pretrained_encoder)['model_state']
+            state_dict = torch.load(args.pretrained_encoder)
+            if 'model_state' in state_dict.keys():
+                state_dict = state_dict['model_state']
+            else:
+                state_dict = state_dict['model']
         else:
             state_dict = torch.hub.load_state_dict_from_url('https://dl.fbaipublicfiles.com/pyslowfast/masked_models/VIT_B_16x4_MAE_PT.pyth')['model_state']   ##pretrained on Kinetics
         # print(model)
         
         model = nn.parallel.DataParallel(model, device_ids=[i for i in range(args.num_gpus)])
+        # pdb.set_trace()
         # print(model)
         # print(state_dict.keys())
         for name in model.state_dict().keys():
             if 'decoder' in name or 'decode_heads' in name:
                 continue
+
+                
             matched = 0
 
             for name_, param in state_dict.items():
                 # if args.num_gpus > 1:
+                if 'encoder.' in name_:
+                    name_ = name_.replace('encoder.', '')
                 name_ = f'module.{name_}'
+
+
+                # pdb.set_trace()
                 if name_ == name:
+
                     model.state_dict()[name].copy_(param)
                     matched = 1
                     break
-                elif '.qkv.' in name:
+            if matched == 0 and '.qkv.' in name:
+                if not args.use_v1:
                     q_name = name.replace('.qkv.', '.q.').replace('module.', '')
                     k_name = name.replace('.qkv.', '.k.').replace('module.', '')
                     v_name = name.replace('.qkv.', '.v.').replace('module.', '')
@@ -186,6 +203,14 @@ def main():
                     model.state_dict()[name].copy_(params)
                     matched = 1
                     break
+                else:
+                    if '.qkv.bias' in name:
+                        q_name = name.replace('.qkv.', '.q_').replace('module.', 'encoder.')
+                        v_name = name.replace('.qkv.', '.v_').replace('module.', 'encoder.')
+                        params = torch.cat([state_dict[q_name], torch.zeros_like(state_dict[v_name], requires_grad=False), state_dict[v_name]])
+                        model.state_dict()[name].copy_(params)
+                        matched = 1
+                        break
             if matched == 0:
                 print(f"parameters {name} not found")
 
